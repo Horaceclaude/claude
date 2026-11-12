@@ -373,6 +373,7 @@
       $('#slate').hidden = false;
       $('#controls').hidden = false;
       renderPosition();
+      ensureFurigana();
     }
     addHistory(state.query, total);
   }
@@ -380,6 +381,7 @@
     state.track = Number(e && e.trackNumber) || 0;
     state.videoId = e && e.video ? String(e.video) : null;
     state.clipTime = -1; state.views = 0; state.targetCid = null; state.targetText = '';
+    furi.target = null; furi.live = null;
     $('#slate-target').textContent = '…';
     $('#slate-live').hidden = true;
     renderPosition();
@@ -394,13 +396,15 @@
       state.targetText = cap.plain;
       state.targetCid = e && e.id != null ? String(e.id) : null;
       if (t >= 0) state.clipTime = Math.floor(t);
-      renderSegs($('#slate-target'), cap.segs);
+      furi.target = cap; furi.live = null;
+      renderCaption($('#slate-target'), cap);
       $('#slate-live').hidden = true;
       renderLinks();
     } else {
       // The video has moved on: show the running caption under the pinned sentence.
       const live = $('#slate-live');
-      live.textContent = cap.plain;
+      furi.live = cap;
+      renderCaption(live, cap);
       live.hidden = false;
     }
   }
@@ -582,8 +586,25 @@
     parts.forEach((p, i) => { if (p) node.appendChild(i % 2 ? el(tag || 'u', null, p) : document.createTextNode(p)); });
   }
   // A sentence with readings in braces becomes <ruby> elements; the searched word is wrapped in <mark>.
-  function renderFurigana(node, furi, form) {
+  // Draw text pieces, some with a reading (<ruby>), wrapping the given character ranges in <mark>.
+  function drawRuby(node, segs, ranges) {
     node.textContent = '';
+    const inside = (at, len) => ranges.some((r) => at < r[1] && at + len > r[0]);
+    let mark = null;
+    const target = (hit) => { if (!hit) { mark = null; return node; } if (!mark) { mark = el('mark'); node.appendChild(mark); } return mark; };
+    for (const s of segs) {
+      if (s.r) {
+        const ruby = el('ruby', null, s.t);
+        ruby.appendChild(el('rt', null, s.r));
+        target(inside(s.at, s.t.length)).appendChild(ruby);
+      } else {
+        for (let i = 0; i < s.t.length; i++) target(inside(s.at + i, 1)).appendChild(document.createTextNode(s.t[i]));
+      }
+    }
+    node.normalize();
+  }
+  // A sentence with readings in braces, 学{がっ}校{こう}, drawn with furigana; the searched word is marked.
+  function renderFurigana(node, furi, form) {
     const segs = [];
     const re = /([^{}])\{([^}]*)\}|([^{}]+?)(?=[^{}]\{|$)/g;
     let m, plain = '';
@@ -593,19 +614,95 @@
       else segs.push({ t: t, r: r, at: plain.length });
       plain += t;
     }
-    const from = plain.indexOf(form), to = from < 0 ? -1 : from + form.length;
-    let mark = null;
-    const target = (inside) => { if (!inside) { mark = null; return node; } if (!mark) { mark = el('mark'); node.appendChild(mark); } return mark; };
-    for (const s of segs) {
-      if (s.r) {
-        const ruby = el('ruby', null, s.t);
-        ruby.appendChild(el('rt', null, s.r));
-        target(s.at < to && s.at + s.t.length > from).appendChild(ruby);
-      } else {
-        for (let i = 0; i < s.t.length; i++) target(s.at + i >= from && s.at + i < to).appendChild(document.createTextNode(s.t[i]));
-      }
+    const from = plain.indexOf(form);
+    drawRuby(node, segs, from < 0 ? [] : [[from, from + form.length]]);
+  }
+
+  /* ----- furigana for the video captions: readings worked out in the browser by the kuromoji tokenizer ----- */
+  const furi = { on: store.get('furigana', true) !== false, tokenizer: null, promise: null, target: null, live: null };
+  function loadTokenizer() {
+    if (furi.promise) return furi.promise;
+    furi.promise = new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/kuromoji/kuromoji.js';
+      s.onerror = () => resolve(false);
+      s.onload = () => {
+        try {
+          window.kuromoji.builder({ dicPath: 'vendor/kuromoji/dict/' }).build((err, tk) => { furi.tokenizer = err ? null : tk; resolve(!err && !!tk); });
+        } catch (e) { resolve(false); }
+      };
+      document.head.appendChild(s);
+    });
+    return furi.promise;
+  }
+  // 食べる + たべる -> 食{た}べる: the kana already written in the word are not repeated above it.
+  function alignReading(surface, reading) {
+    const runs = surface.match(/[一-鿿々ヶ]+|[^一-鿿々ヶ]+/g) || [];
+    const isKanji = (r) => /[一-鿿々ヶ]/.test(r[0]);
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = reading.match(new RegExp('^' + runs.map((r) => (isKanji(r) ? '(.+)' : esc(toHira(r)))).join('') + '$'));
+    if (!m) return [{ t: surface, r: reading }];
+    let g = 1;
+    return runs.map((r) => ({ t: r, r: isKanji(r) ? m[g++] : '' }));
+  }
+  // Counting words the tokenizer reads digit by digit (一人 as いち+にん).
+  const FIXED = { 一人: 'ひとり', 二人: 'ふたり', 一つ: 'ひとつ', 二つ: 'ふたつ', 三つ: 'みっつ', 四つ: 'よっつ', 五つ: 'いつつ', 六つ: 'むっつ', 七つ: 'ななつ', 八つ: 'やっつ', 九つ: 'ここのつ', 二十歳: 'はたち', 一日中: 'いちにちじゅう' };
+  const RE_FIXED = new RegExp('(' + Object.keys(FIXED).sort((x, y) => y.length - x.length).join('|') + ')');
+  function captionSegs(text) {
+    const segs = [];
+    let base = 0;
+    for (const chunk of text.split(RE_FIXED)) {
+      if (FIXED[chunk]) { let off = base; for (const part of alignReading(chunk, FIXED[chunk])) { segs.push({ t: part.t, r: part.r, at: off }); off += part.t.length; } }
+      else if (chunk) tokenSegs(chunk, base, segs);
+      base += chunk.length;
     }
-    node.normalize();
+    return segs;
+  }
+  function tokenSegs(text, base, segs) {
+    let pos = 0;
+    for (const tk of furi.tokenizer.tokenize(text)) {
+      const at = text.indexOf(tk.surface_form, pos);
+      if (at < 0) continue;
+      if (at > pos) segs.push({ t: text.slice(pos, at), r: '', at: base + pos });
+      const rd = tk.reading && tk.reading !== '*' ? toHira(tk.reading) : '';
+      if (rd && RE_KANJI.test(tk.surface_form)) {
+        let off = base + at;
+        for (const part of alignReading(tk.surface_form, rd)) { segs.push({ t: part.t, r: part.r, at: off }); off += part.t.length; }
+      } else segs.push({ t: tk.surface_form, r: '', at: base + at });
+      pos = at + tk.surface_form.length;
+    }
+    if (pos < text.length) segs.push({ t: text.slice(pos), r: '', at: base + pos });
+  }
+  // A caption line, with furigana when it is switched on and the tokenizer has arrived.
+  function renderCaption(node, cap) {
+    if (!cap) return;
+    if (furi.on && furi.tokenizer) {
+      try {
+        const ranges = [];
+        let at = 0;
+        for (const s of cap.segs) { if (s.hit) ranges.push([at, at + s.t.length]); at += s.t.length; }
+        drawRuby(node, captionSegs(cap.plain), ranges);
+        return;
+      } catch (e) { /* fall through to the plain caption */ }
+    }
+    renderSegs(node, cap.segs);
+  }
+  function redrawCaptions() {
+    renderCaption($('#slate-target'), furi.target);
+    if (furi.live) renderCaption($('#slate-live'), furi.live);
+  }
+  function renderFuriButton(loading) {
+    const b = $('#furi-btn');
+    b.setAttribute('aria-pressed', String(furi.on));
+    b.textContent = !furi.on ? 'Furigana off' : loading ? 'Furigana loading…' : 'Furigana on';
+  }
+  function ensureFurigana() {
+    if (!furi.on || furi.tokenizer) { renderFuriButton(false); return; }
+    renderFuriButton(true);
+    loadTokenizer().then((ok) => {
+      renderFuriButton(false);
+      if (ok) redrawCaptions(); else if (furi.on) toast('Furigana could not be loaded. Captions show without it.');
+    });
   }
   const wrapFirst = (text, part, by) => { const i = text.indexOf(part); return i < 0 ? text : text.slice(0, i) + by + text.slice(i + part.length); };
 
@@ -816,7 +913,7 @@
       stem: stem, opts: opts, ans: opts.indexOf(right),
       after: (box) => {
         const ja = el('p', { lang: 'ja' });
-        renderMarked(ja, wrapFirst(x.ja, x.form, U0 + x.form + U1), 'mark');
+        renderFurigana(ja, x.furi || x.ja, x.form);          // now that it is answered, show the readings
         box.appendChild(ja);
         if (x.en) box.appendChild(el('p', null, x.en));
       },
@@ -913,6 +1010,8 @@
     $('#save-btn').addEventListener('click', toggleSaved);
     $('#saved-copy').addEventListener('click', () => copyText(savedList().map((s) => [s.w, s.r, s.g].join('\t')).join('\n'), 'Saved words copied'));
     $('#history-clear').addEventListener('click', () => { store.set('history', []); renderHistory(); });
+    $('#furi-btn').addEventListener('click', () => { furi.on = !furi.on; store.set('furigana', furi.on); ensureFurigana(); redrawCaptions(); });
+    renderFuriButton(false);
     $('#examples-more').addEventListener('click', () => { study.showAll = !study.showAll; renderExamples(); });
     $('#practice-new').addEventListener('click', renderPractice);
 
@@ -958,6 +1057,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   // Small surface for automated checks.
-  window.__kikitori = { state: state, study: study, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, makeBlank: makeBlank, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
+  window.__kikitori = { state: state, study: study, furi: furi, loadTokenizer: loadTokenizer, alignReading: alignReading, captionSegs: captionSegs, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, makeBlank: makeBlank, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
     events: { onFetchDone: onFetchDone, onVideoChange: onVideoChange, onCaptionChange: onCaptionChange, onCaptionConsumed: onCaptionConsumed, onPlayerStateChange: onPlayerStateChange, onSpeedChange: onSpeedChange, onError: onError } };
 })();

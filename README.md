@@ -7,7 +7,8 @@ Type a Japanese word, hear it said in real YouTube videos, then study it.
 - You can type kanji (`食べる`), kana (`たべる`), romaji (`taberu`) or a conjugated form (`食べた`).
 - Replay the sentence, go back 5 seconds, slow the speech down, or let it move through videos by itself.
 - Each word shows its reading, meaning and **JLPT level** (N5 to N1, or not on the lists).
-- **Example sentences** with furigana over the kanji and English translations.
+- **Furigana** over the kanji in the video captions (with an on/off switch), in the example sentences, and in the sentence shown after you answer a practice question.
+- **Example sentences** with English translations.
 - **Practice**: questions from the official JLPT practice workbook when your word appears in one, and questions in JLPT format (kanji reading, fill in the blank, writing in kanji) made from the example sentences. Tap an answer to check it.
 - Save words and reopen recent searches.
 
@@ -38,6 +39,7 @@ Open the address on the phone, then:
 - **JLPT levels are a best guess.** The JLPT has published no word list since 2010. The levels here are Jonathan Waller's widely used lists, the same ones Jisho shows.
 - **Official questions** are the 162 vocabulary questions of the *Official Practice Workbook Vol. 2* (2018), all five levels, with their answer keys. Actual exam papers are not released, so this workbook is the official source there is. The 2012 workbook is published as scanned images and is not included.
 - **Practice questions are made by the page**, not by the JLPT. The wrong choices are picked automatically, so now and then one of them could also fit the sentence.
+- **Caption furigana is worked out by the page**, with the kuromoji tokenizer, because YouGlish captions come without readings. It is usually right but can misread names and unusual words. Its dictionary is 18 MB, downloaded once in the background and then kept by the browser; the *Furigana* button under the caption switches it off. Furigana in the example sentences comes from Tatoeba.
 - On phones the browser may wait for a tap on the video before it plays sound.
 - Saved words and history are kept in the browser you use. The laptop and the phone each have their own list.
 - A link such as `…/japanese-vocab-VideoSearching/?q=食べる` opens with the word filled in.
@@ -54,6 +56,7 @@ Open the address on the phone, then:
 | `tools/build_examples.py` | Rebuilds `data/ex/` from the Tatoeba exports |
 | `tools/build_jlpt_questions.py` | Rebuilds `data/jlpt-official.json` from the workbook PDFs |
 | `vendor/wanakana.min.js` | Romaji to kana conversion |
+| `vendor/kuromoji/` | Tokenizer and dictionary used for caption furigana |
 | `manifest.webmanifest`, `icons/` | Name and icon for the home screen |
 
 Each build script says at its top where its input files come from.
@@ -66,4 +69,5 @@ Each build script says at its top where its input files come from.
 - Example sentences from [Tatoeba](https://tatoeba.org), [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/). Each sentence links to its Tatoeba page and names its author where known.
 - Official questions. Source: Official Worldwide Japanese-Language Proficiency Test Website (https://www.jlpt.jp/), *Japanese-Language Proficiency Test Official Practice Workbook Vol. 2*. Used under the site policy for Japanese-language education at no charge; copyright stays with the Japan Foundation and Japan Educational Exchanges and Services.
 - [WanaKana](https://github.com/WaniKani/WanaKana), MIT licence (`vendor/wanakana.LICENSE.txt`).
+- [kuromoji.js](https://github.com/takuyaa/kuromoji.js), Apache License 2.0, with the mecab-ipadic dictionary (`vendor/kuromoji/NOTICE.md`).
 - Fonts: Klee One and Zen Kaku Gothic New (SIL Open Font License), served by Google Fonts.
