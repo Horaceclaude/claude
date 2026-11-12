@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kikitori</title>
+<meta name="description" content="Type a Japanese word and hear it said in real YouTube videos, with captions.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#F2F4F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F141D" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kikitori">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script>
+  // Apply a saved light/dark choice before first paint.
+  try { var t = localStorage.getItem('kikitori.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="./" aria-label="Kikitori home">
+      <span class="brand-jp" lang="ja">聞き取り</span>
+      <span class="brand-en">Kikitori</span>
+    </a>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch between light and dark">
+      <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="wrap layout">
+  <div class="main">
+
+    <form id="search-form" class="search" role="search" autocomplete="off">
+      <h1 class="search-label"><label for="q">Hear a Japanese word in real videos</label></h1>
+      <div class="search-field">
+        <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" name="q" type="search" lang="ja" inputmode="text" enterkeyhint="search"
+               autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off"
+               placeholder="食べる" aria-describedby="search-hint">
+        <button class="btn btn-primary" id="search-btn" type="submit">Search</button>
+      </div>
+      <p class="hint" id="search-hint">Type it in kanji, kana or romaji: <span lang="ja">食べる</span>, <span lang="ja">たべる</span> or taberu.</p>
+    </form>
+
+    <div id="notice" class="notice" hidden></div>
+
+    <div id="meta" class="meta" hidden aria-live="polite">
+      <p class="meta-count"><span id="meta-total" class="num"></span> <span id="meta-total-label"></span></p>
+      <p class="meta-pos" id="meta-pos"></p>
+    </div>
+
+    <section class="screen" id="screen" aria-label="Video and captions">
+      <div id="widget-host" class="widget-host" hidden></div>
+
+      <div id="screen-msg" class="screen-msg">
+        <p class="screen-kicker">Example</p>
+        <p class="slate-line" lang="ja">ご飯を<mark>食べる</mark>前に、手を洗います。</p>
+        <p class="screen-note">Search a word and a video starts playing right where someone says it. The caption appears here, with your word marked.</p>
+      </div>
+
+      <div id="slate" class="slate" hidden>
+        <p id="slate-target" class="slate-line" lang="ja" aria-live="polite"></p>
+        <p id="slate-live" class="slate-live" lang="ja" hidden></p>
+        <div class="slate-tools">
+          <button class="chip-btn" id="copy-btn" type="button">Copy sentence</button>
+          <a class="chip-btn" id="jisho-sentence" target="_blank" rel="noopener">Break it down on Jisho ↗</a>
+          <a class="chip-btn" id="yt-link" target="_blank" rel="noopener">Open on YouTube ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <div id="controls" class="controls" hidden>
+      <div class="controls-main">
+        <button class="btn" id="prev-btn" type="button" title="Previous video (P)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 5v14L8 12zM5 5v14"/></svg><span>Previous</span>
+        </button>
+        <button class="btn" id="replay-btn" type="button" title="Play the sentence again (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v5h5"/></svg><span>Replay</span>
+        </button>
+        <button class="btn btn-primary btn-next" id="next-btn" type="button" title="Next video (N)">
+          <span>Next video</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l11-7zM19 5v14"/></svg>
+        </button>
+      </div>
+      <div class="controls-more">
+        <button class="btn btn-small" id="pause-btn" type="button" title="Pause or play (K)"><span id="pause-label">Pause</span></button>
+        <button class="btn btn-small" id="back-btn" type="button" title="Back 5 seconds (B)">−5 s</button>
+        <div class="seg" role="group" aria-label="Playback speed" id="speed">
+          <button type="button" data-speed="0.5">0.5×</button>
+          <button type="button" data-speed="0.75">0.75×</button>
+          <button type="button" data-speed="1" aria-pressed="true">1×</button>
+          <button type="button" data-speed="1.25">1.25×</button>
+        </div>
+        <div class="auto">
+          <label class="switch" for="auto-next" title="After the sentence, move to the next video by itself">
+            <input type="checkbox" id="auto-next">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>Auto-next after</span>
+          </label>
+          <select id="repeats" aria-label="How many times to play each sentence before moving on">
+            <option value="1">1 play</option>
+            <option value="2">2 plays</option>
+            <option value="3">3 plays</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <section id="word" class="word" hidden aria-label="Word details">
+      <div class="word-head">
+        <p class="word-text" lang="ja"><span id="word-main"></span><span id="word-reading" class="word-reading"></span></p>
+        <div class="word-actions">
+          <button class="btn btn-small" id="save-btn" type="button" aria-pressed="false">☆ Save word</button>
+          <a class="btn btn-small" id="jisho-word" target="_blank" rel="noopener">Jisho ↗</a>
+        </div>
+      </div>
+      <p class="word-gloss"><span id="word-pos" class="tag" hidden></span><span id="word-gloss"></span></p>
+    </section>
+
+    <section id="starter" class="starter" aria-label="Words to try">
+      <h2>Try one</h2>
+      <div class="chips" id="starter-chips"></div>
+    </section>
+
+  </div>
+
+  <aside class="rail" aria-label="Your words">
+    <section class="panel" id="saved-panel">
+      <div class="panel-head">
+        <h2>Saved words</h2>
+        <button class="link-btn" id="saved-copy" type="button" hidden>Copy list</button>
+      </div>
+      <ul class="list" id="saved-list"></ul>
+      <p class="empty" id="saved-empty">Words you save with ☆ appear here.</p>
+    </section>
+
+    <section class="panel" id="history-panel">
+      <div class="panel-head">
+        <h2>Recent searches</h2>
+        <button class="link-btn" id="history-clear" type="button" hidden>Clear</button>
+      </div>
+      <ul class="list" id="history-list"></ul>
+      <p class="empty" id="history-empty">Your last searches appear here, with how many videos each one found.</p>
+    </section>
+
+    <section class="panel keys" aria-label="Keyboard shortcuts">
+      <h2>Keyboard</h2>
+      <dl>
+        <div><dt><kbd>/</kbd></dt><dd>Search</dd></div>
+        <div><dt><kbd>N</kbd> <kbd>P</kbd></dt><dd>Next, previous video</dd></div>
+        <div><dt><kbd>R</kbd></dt><dd>Replay the sentence</dd></div>
+        <div><dt><kbd>K</kbd> <kbd>B</kbd></dt><dd>Pause, back 5 s</dd></div>
+      </dl>
+    </section>
+  </aside>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p>Video search, timing and captions come from <a href="https://youglish.com/japanese" target="_blank" rel="noopener">YouGlish</a>. Videos play in the YouTube player, so the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a> apply, and both services may set cookies.</p>
+    <p>Word meanings: <a href="https://www.edrdg.org/jmdict/j_jmdict.html" target="_blank" rel="noopener">JMdict</a> © EDRDG, CC BY-SA 4.0. Romaji conversion: WanaKana (MIT). A personal, non-commercial study tool. Your saved words and history stay in this browser.</p>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/wanakana.min.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
