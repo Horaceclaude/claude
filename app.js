@@ -566,7 +566,8 @@
     if (!study.shards.has(key)) {
       study.shards.set(key, fetch('data/ex/' + key + '.json').then((r) => (r.ok ? r.json() : {})).catch(() => ({})));
     }
-    return study.shards.get(key).then((sh) => (sh[id] || []).map((x) => ({ ja: x[0], en: x[1], id: x[2], by: x[3], form: x[4] })));
+    // The sentence arrives with readings in braces, 学{がっ}校{こう}; keep that for display and a plain copy for everything else.
+    return study.shards.get(key).then((sh) => (sh[id] || []).map((x) => ({ ja: x[0].replace(/\{[^}]*\}/g, ''), furi: x[0], en: x[1], id: x[2], by: x[3], form: x[4] })));
   }
   function loadOfficial() {
     if (!study.official) study.official = fetch('data/jlpt-official.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -579,6 +580,32 @@
     node.textContent = '';
     const parts = String(text).split(new RegExp('[' + U0 + U1 + ']'));
     parts.forEach((p, i) => { if (p) node.appendChild(i % 2 ? el(tag || 'u', null, p) : document.createTextNode(p)); });
+  }
+  // A sentence with readings in braces becomes <ruby> elements; the searched word is wrapped in <mark>.
+  function renderFurigana(node, furi, form) {
+    node.textContent = '';
+    const segs = [];
+    const re = /([^{}])\{([^}]*)\}|([^{}]+?)(?=[^{}]\{|$)/g;
+    let m, plain = '';
+    while ((m = re.exec(furi))) {
+      const t = m[1] != null ? m[1] : m[3], r = m[1] != null ? m[2] : '', prev = segs[segs.length - 1];
+      if (r && prev && prev.r) { prev.t += t; prev.r += r; }          // 学+校 share one reading box, so the kanji stay evenly spaced
+      else segs.push({ t: t, r: r, at: plain.length });
+      plain += t;
+    }
+    const from = plain.indexOf(form), to = from < 0 ? -1 : from + form.length;
+    let mark = null;
+    const target = (inside) => { if (!inside) { mark = null; return node; } if (!mark) { mark = el('mark'); node.appendChild(mark); } return mark; };
+    for (const s of segs) {
+      if (s.r) {
+        const ruby = el('ruby', null, s.t);
+        ruby.appendChild(el('rt', null, s.r));
+        target(s.at < to && s.at + s.t.length > from).appendChild(ruby);
+      } else {
+        for (let i = 0; i < s.t.length; i++) target(s.at + i >= from && s.at + i < to).appendChild(document.createTextNode(s.t[i]));
+      }
+    }
+    node.normalize();
   }
   const wrapFirst = (text, part, by) => { const i = text.indexOf(part); return i < 0 ? text : text.slice(0, i) + by + text.slice(i + part.length); };
 
@@ -632,7 +659,7 @@
     for (const x of (study.showAll ? list : list.slice(0, 3))) {
       const li = el('li');
       const ja = el('p', { class: 'ex-ja', lang: 'ja' });
-      renderMarked(ja, wrapFirst(x.ja, x.form, U0 + x.form + U1), 'mark');
+      renderFurigana(ja, x.furi || x.ja, x.form);
       li.appendChild(ja);
       li.appendChild(el('p', { class: 'ex-en' }, x.en));
       const src = el('p', { class: 'ex-src' });

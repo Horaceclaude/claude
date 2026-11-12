@@ -7,7 +7,7 @@ Type a Japanese word, hear it said in real YouTube videos, then study it.
 - You can type kanji (`食べる`), kana (`たべる`), romaji (`taberu`) or a conjugated form (`食べた`).
 - Replay the sentence, go back 5 seconds, slow the speech down, or let it move through videos by itself.
 - Each word shows its reading, meaning and **JLPT level** (N5 to N1, or not on the lists).
-- **Example sentences** with English translations.
+- **Example sentences** with furigana over the kanji and English translations.
 - **Practice**: questions from the official JLPT practice workbook when your word appears in one, and questions in JLPT format (kanji reading, fill in the blank, writing in kanji) made from the example sentences. Tap an answer to check it.
 - Save words and reopen recent searches.
 

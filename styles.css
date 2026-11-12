@@ -225,7 +225,9 @@ button { cursor: pointer; }
 .study-note { font-size: 0.8125rem; color: var(--ink-2); margin: 2px 0 10px; }
 .examples { margin: 6px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .examples li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
-.ex-ja { font: 600 1.125rem/1.6 var(--font-jp); overflow-wrap: anywhere; }
+.ex-ja { font: 600 1.125rem/2.1 var(--font-jp); overflow-wrap: anywhere; }
+.ex-ja rt { font: 400 0.5625rem/1 var(--font-ui); color: var(--ink-2); letter-spacing: 0; }
+.ex-ja mark rt { color: var(--mark-ink); }
 .ex-ja mark, .q-after mark { background: var(--mark); color: var(--mark-ink); border-radius: 5px; padding: 0 0.12em; }
 .ex-en { font-size: 0.9375rem; color: var(--ink-2); }
 .ex-src { font-size: 0.75rem; color: var(--ink-2); }
