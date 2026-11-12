@@ -17,7 +17,7 @@ The site is served by GitHub Pages straight from this repository.
 1. Open the repository on GitHub, then **Settings → Pages**.
 2. Under **Build and deployment**, set **Source** to *Deploy from a branch*, pick the branch **main** and the folder **/ (root)**, then **Save**.
 3. Wait about a minute. The address appears at the top of that page:
-   `https://horaceclaude.github.io/claude/`
+   `https://horaceclaude.github.io/japanese-video-search/`
 
 On a free GitHub account, Pages only works for public repositories. If the Pages screen asks for that, change it under **Settings → General → Danger Zone → Change repository visibility**. Nothing in this repository is personal.
 
@@ -37,7 +37,7 @@ It then opens from its own icon, full screen.
 - Videos play in the YouTube player, so the [YouTube Terms of Service](https://www.youtube.com/t/terms) and the [Google Privacy Policy](https://policies.google.com/privacy) apply.
 - On phones the browser may wait for a tap on the video before it plays sound. That is a browser rule.
 - Saved words and history are kept in the browser you use. The laptop and the phone each have their own list.
-- A link such as `…/claude/?q=食べる` opens with the word filled in.
+- A link such as `…/japanese-video-search/?q=食べる` opens with the word filled in.
 
 ## Files
 
