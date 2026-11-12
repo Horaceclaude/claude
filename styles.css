@@ -184,7 +184,13 @@ button { cursor: pointer; }
 .chip-btn[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); border-color: var(--screen-muted); }
 .slate-line rt, .slate-live rt { font: 400 0.4em/1.1 var(--font-ui); color: var(--screen-muted); letter-spacing: 0; }
 .slate-live rt { font-size: 0.55em; }
-.slate-line mark rt { color: var(--mark-ink); }
+.slate-line ruby.hit rt, .ex-ja ruby.hit rt, .q-after ruby.hit rt {
+  background: var(--mark); color: var(--mark-ink); font-weight: 700; border-radius: 5px 5px 0 0; padding: 2px 4px 1px;
+}
+.slate-line ruby.hit rt { font-size: 0.46em; }
+ruby.hit:has(+ mark) mark { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 0; }
+ruby.hit + mark { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 0; padding-left: 0.04em; }
+.slate-line ruby.hit mark, .ex-ja ruby.hit mark, .q-after ruby.hit mark { margin: 0; }
 .screen :focus-visible { outline-color: var(--mark); }
 
 /* ---------- controls ---------- */
@@ -231,7 +237,7 @@ button { cursor: pointer; }
 .examples li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .ex-ja { font: 600 1.125rem/2.1 var(--font-jp); overflow-wrap: anywhere; }
 .ex-ja rt, .q-after rt { font: 400 0.5625rem/1 var(--font-ui); color: var(--ink-2); letter-spacing: 0; }
-.ex-ja mark rt, .q-after mark rt { color: var(--mark-ink); }
+.ex-ja ruby.hit rt, .q-after ruby.hit rt { font-size: 0.6875rem; }
 .ex-ja mark, .q-after mark { background: var(--mark); color: var(--mark-ink); border-radius: 5px; padding: 0 0.12em; }
 .ex-en { font-size: 0.9375rem; color: var(--ink-2); }
 .ex-src { font-size: 0.75rem; color: var(--ink-2); }

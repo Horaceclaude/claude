@@ -594,9 +594,12 @@
     const target = (hit) => { if (!hit) { mark = null; return node; } if (!mark) { mark = el('mark'); node.appendChild(mark); } return mark; };
     for (const s of segs) {
       if (s.r) {
-        const ruby = el('ruby', null, s.t);
+        // The highlight goes on the word only, inside the <ruby>, so its reading stays above the coloured box.
+        const hit = inside(s.at, s.t.length), ruby = el('ruby', hit ? { class: 'hit' } : null);
+        ruby.appendChild(hit ? el('mark', null, s.t) : document.createTextNode(s.t));
         ruby.appendChild(el('rt', null, s.r));
-        target(inside(s.at, s.t.length)).appendChild(ruby);
+        mark = null;
+        node.appendChild(ruby);
       } else {
         for (let i = 0; i < s.t.length; i++) target(inside(s.at + i, 1)).appendChild(document.createTextNode(s.t[i]));
       }
