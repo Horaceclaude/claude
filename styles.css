@@ -214,6 +214,50 @@ button { cursor: pointer; }
 .tag { display: inline-block; font-size: 0.75rem; font-weight: 500; color: var(--ink-2); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; margin-right: 8px; vertical-align: 1px; }
 #save-btn[aria-pressed="true"] { background: var(--mark); border-color: var(--mark); color: var(--mark-ink); font-weight: 700; }
 
+.word-level { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 4px; }
+.jlpt { display: inline-block; font: 700 0.8125rem/1 var(--font-ui); letter-spacing: 0.04em; padding: 5px 9px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); white-space: nowrap; }
+.jlpt[data-level="0"] { background: var(--surface-2); color: var(--ink-2); }
+.level-note { font-size: 0.8125rem; color: var(--ink-2); }
+
+/* ---------- study: examples, official questions, practice ---------- */
+.study { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.study-block { border-top: 1px solid var(--line); padding-block: 14px 12px; }
+.study-note { font-size: 0.8125rem; color: var(--ink-2); margin: 2px 0 10px; }
+.examples { margin: 6px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.examples li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.ex-ja { font: 600 1.125rem/1.6 var(--font-jp); overflow-wrap: anywhere; }
+.ex-ja mark, .q-after mark { background: var(--mark); color: var(--mark-ink); border-radius: 5px; padding: 0 0.12em; }
+.ex-en { font-size: 0.9375rem; color: var(--ink-2); }
+.ex-src { font-size: 0.75rem; color: var(--ink-2); }
+.ex-src a { color: inherit; }
+.q-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 8px; }
+.q { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.q-kicker { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.q-instr { font-size: 0.875rem; color: var(--ink-2); }
+.q-instr[lang="ja"] { font-family: var(--font-jp); }
+.q-stem { font: 600 1.1875rem/1.7 var(--font-jp); overflow-wrap: anywhere; }
+.q-stem u, .q-opt u { text-decoration-thickness: 2px; text-underline-offset: 5px; text-decoration-color: var(--accent); }
+.q-opts { margin: 2px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.q-opts.long { grid-template-columns: minmax(0, 1fr); }
+.q-opt {
+  width: 100%; min-height: 44px; display: flex; align-items: baseline; gap: 10px; text-align: left;
+  border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+  padding: 8px 12px; font: 400 1.0625rem/1.5 var(--font-jp); overflow-wrap: anywhere;
+}
+.q-opt:hover:not(:disabled) { border-color: var(--accent); }
+.q-opt:disabled { cursor: default; color: var(--ink); opacity: 1; }
+.q-opt .n { font: 700 0.8125rem var(--font-ui); color: var(--ink-2); flex: none; }
+.q-opt.right { border-color: #1E8E5A; background: color-mix(in srgb, #1E8E5A 14%, var(--surface)); }
+.q-opt.wrong { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.q-result { font-size: 0.9375rem; font-weight: 700; min-height: 1.4em; }
+.q-result.ok { color: #1E8E5A; }
+.q-result.no { color: var(--danger); }
+.q-after { font-size: 0.9375rem; color: var(--ink-2); display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.q-after [lang="ja"] { font: 400 1rem/1.6 var(--font-jp); color: var(--ink); }
+.q-source { font-size: 0.75rem; color: var(--ink-2); }
+.q-source a { color: inherit; }
+@media (max-width: 480px) { .q-opts { grid-template-columns: minmax(0, 1fr); } .q { padding: 12px; } }
+
 /* ---------- starter + rail ---------- */
 .starter { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 4px; }
 h2 { font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
