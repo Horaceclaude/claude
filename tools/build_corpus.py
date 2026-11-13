@@ -21,6 +21,8 @@ Writes
                        and the case particles almost never used before that verb (wrong choices for a particle question)]]
                        A count of 0 marks grammar found elsewhere in a sentence with the word: for practice questions only.
   data/grammar.json    grammar points: id -> [pattern, level, English meaning, formation, most common surface, how it attaches]
+  data/fm/00..63.json  conjugated forms per verb and adjective, most common first: [[form as written, times seen,
+                       [sentence with readings, English, id, word start, form end, phrase boundaries, source, article]]]
 """
 import sys, os, re, csv, bz2, json, collections, math
 from sudachipy import Dictionary, SplitMode
@@ -560,6 +562,62 @@ def record(eid, sentence, ms, k, en, sid, src, title, base_score):
             row = [furigana(ms), en, sid, title, form_of(ms, k), phrases(ms), src]
             lst.append((base_score, row)); lst.sort(key=lambda x: x[0]); del lst[12:]
 
+# ---- conjugated forms as they occur: 食べさせられた, 読んでいる, 高くなかった, 静かだった
+TE_AUX = {'いる', '居る', 'おる', 'しまう', '仕舞う', 'おく', '置く', 'みる', '見る', 'くる', '来る', 'いく', '行く', 'ある', '有る', 'あげる', '上げる',
+          'くれる', '呉れる', 'もらう', '貰う', 'いただく', '頂く', 'くださる', '下さる', 'ちゃう', 'じゃう', 'とく', 'どく'}
+def form_full(ms, k, cls):
+    """The word with the endings that make its form: auxiliaries, て + helper verbs, ば, たり, ながら, そう, すぎる; None for no ending."""
+    j, s = k, ms[k].surface()
+    if cls == 'vs':
+        if j + 1 < len(ms) and ms[j + 1].dictionary_form() in ('する', '為る', '出来る') and ms[j + 1].part_of_speech()[0] == '動詞':
+            j += 1; s += ms[j].surface()
+        else: return None
+    start = j
+    while j + 1 < len(ms) and j - start < 8 and len(s) < 16:
+        n, prev = ms[j + 1], ms[j]
+        p, sf, d = n.part_of_speech(), n.surface(), n.dictionary_form()
+        after_te = prev.surface() in ('て', 'で', 'ちゃ', 'じゃ') and prev.part_of_speech()[0] in ('助詞', '助動詞')
+        nxt = ms[j + 2] if j + 2 < len(ms) else None
+        ok = (p[0] == '助動詞' and (d not in ('です', 'だ') or cls == 'adj-na' or prev.part_of_speech()[0] == '助動詞')) \
+            or (p[0] == '助詞' and sf in ('て', 'で', 'ば', 'たり', 'だり', 'ながら', 'ちゃ', 'じゃ') and cls != 'adj-na') \
+            or (p[0] == '助詞' and sf == 'は' and after_te and nxt is not None and nxt.dictionary_form() in ('いける', '行ける', 'なる', '成る')) \
+            or (p[0] == '動詞' and d in ('いける', '行ける', 'なる', '成る') and (prev.surface() in ('ば', 'は') or (prev.surface() == 'く' and ms[j - 1].surface().endswith('な')))) \
+            or (p[0] == '助詞' and sf == 'は' and cls == 'adj-na' and prev.surface() == 'で' and nxt is not None and nxt.dictionary_form() in ('ない', 'ある')) \
+            or (p[0] == '助詞' and sf == 'も' and after_te and nxt is not None and nxt.dictionary_form() in ('いい', '良い', '構う')) \
+            or (p[0] == '動詞' and p[1] == '非自立可能' and (after_te or d in ('ちゃう', 'じゃう', 'とく', 'どく')) and d in TE_AUX) \
+            or (p[0] == '動詞' and d in ('過ぎる', 'すぎる') and prev.part_of_speech()[0] in ('動詞', '形容詞', '形状詞')) \
+            or (p[0] == '動詞' and d in ('なる', '成る') and cls == 'adj-i' and j == start and prev.surface().endswith('く')) \
+            or (p[0] == '動詞' and d in ('ある', '有る') and cls == 'adj-na' and prev.surface() in ('じゃ', 'は', 'で')) \
+            or (p[0] == '形容詞' and p[1] == '非自立可能' and d in ('ない', '無い', 'やすい', 'にくい', '難い', 'ほしい', '欲しい', 'いい', '良い')
+                and (d not in ('いい', '良い') or prev.surface() == 'も')) \
+            or (p[0] == '形状詞' and p[1] == '助動詞語幹' and sf == 'そう') \
+            or (p[0] == '接尾辞' and (sf in ('さ', 'がる', 'がっ', 'がり', 'げ') or d in ('やすい', 'にくい', 'づらい', '難い', 'がたい')))
+        if not ok: break
+        j += 1; s += sf
+    if j == start:
+        cf = ms[k].part_of_speech()[5]           # one word that is itself a form: 行こう (volitional), 寝ろ (imperative), 高く (adverb)
+        if cf.startswith(('意志推量形', '命令形')) or (cls == 'adj-i' and cf.startswith('連用形-一般')):
+            return (s, j)
+        return None
+    while j > start and ms[j].part_of_speech()[0] == '助詞' and ms[j].surface() in ('は', 'も'):   # never end on a dangling particle
+        s = s[:-len(ms[j].surface())]; j -= 1
+    return (s, j) if j > start else None
+FORM_CLS = re.compile(r'^(v|adj-i|adjx|adj-na)')
+forms_n = collections.defaultdict(collections.Counter)      # word -> form -> times seen
+forms_best = {}                                              # (word, form) -> light example
+def note_form(eid, sentence, ms, k, en, sid, src, title, base):
+    cls = info[eid][3]
+    if not FORM_CLS.match(cls): return
+    f = form_full(ms, k, cls)
+    if not f: return
+    form, j = f
+    c = forms_n[eid]
+    c[form] += 1
+    key = (eid, form)
+    sc = base + (0 if en else 40) + abs(len(sentence) - 22)
+    if (key in forms_best and sc < forms_best[key][0]) or (key not in forms_best and len(c) <= 40):
+        forms_best[key] = (sc, sentence, en, sid, src, title, ms[k].begin(), ms[j].end())
+
 # Tatoeba
 for eid, lst in occ.items():
     for sid, mid, form in lst:
@@ -574,6 +632,7 @@ for eid, lst in occ.items():
         n = len(ja)
         good = (8 <= n <= 40) and en and not BAD.search(ja)
         record(eid, ja, ms, k, en, sid, 't', '', (0 if good else 100) + abs(n - 20) + (0 if sid in READ else 30))
+        if n <= 40: note_form(eid, ja, ms, k, en, sid, 't', '', 0 if sid in READ else 10)
 print('Tatoeba done: words', len(occ), 'sentences', global_total, file=sys.stderr, flush=True)
 
 def complete(ms):
@@ -592,6 +651,7 @@ def scan(sentence, en, sid, src, title, base):
     ents = [entry_for(m) for m in ms]
     hit = False
     for k, eid in enumerate(ents):
+        if eid is not None and len(sentence) <= 40: note_form(eid, sentence, ms, k, en, sid, src, title, base)
         if eid is None or total[eid] >= PER_WORD_SENTENCES: continue
         if len(EX.get(eid, ())) >= PER_WORD_EXAMPLES and total[eid] >= 60: continue
         score = base + abs(len(sentence) - 20) + 4 * difficulty(ents, eid)
@@ -736,4 +796,25 @@ json.dump({'source': 'Grammar points, levels and English meanings: OpenJLPT (CC 
            'fields': ['pattern', 'level', 'meaning', 'formation', 'surface', 'attaches'], 'points': G,
            'particles': sorted(PARTICLES)},
           open(os.path.join(out_dir, 'grammar.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+# ---- conjugated forms per word, with a sentence for each (data/fm)
+fshards = [dict() for _ in range(SHARDS)]
+nf = nrows = 0
+for eid, c in forms_n.items():
+    rows = []
+    for form, cnt in c.most_common():
+        t = forms_best.get((eid, form))
+        if not t: continue
+        if cnt < 2 and len(rows) >= 4: continue
+        sc, sentence, en, sid, src, title, ws, fe = t
+        ms = list(tok.tokenize(sentence, SplitMode.C))
+        furi = READ.get(sid, sentence) if src == 't' else furigana(ms)
+        rows.append([form, cnt, [furi, en, sid, ws, fe, phrases(ms), src, title]])
+        if len(rows) >= 14: break
+    if rows: fshards[eid % SHARDS][str(eid)] = rows; nf += 1; nrows += len(rows)
+os.makedirs(os.path.join(out_dir, 'fm'), exist_ok=True)
+fsize = 0
+for i, sh in enumerate(fshards):
+    p = os.path.join(out_dir, 'fm', '%02d.json' % i)
+    json.dump(sh, open(p, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':')); fsize += os.path.getsize(p)
+print('conjugated forms: words', nf, '| forms with a sentence', nrows, '| bytes', fsize, file=sys.stderr)
 print('words with grammar', nwords, '| sentences analysed', global_total, '| shard bytes', size, file=sys.stderr)

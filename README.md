@@ -4,7 +4,8 @@ Type a Japanese word, hear it said in real YouTube videos, then study it.
 
 - The video starts at the moment the word is spoken, with the caption shown underneath and your word marked.
 - You see how many videos use the word, and **Next video** jumps to another one.
-- You can type kanji (`食べる`), kana (`たべる`), romaji (`taberu`) or a conjugated form (`食べた`).
+- You can type kanji (`食べる`), kana (`たべる`), romaji (`taberu`) or any conjugated form (`食べた`, `食べさせられなかった`, `読んでいる`, `高くなかった`, `静かだった`).
+- **Conjugated forms are explained**: the page finds the dictionary word and shows, step by step, the grammar that made the form (食べる → 食べさせられる 使役受身形 → 食べさせられない ない形 → 食べさせられなかった 過去), each with its JLPT level and an English explanation. It shows a real sentence that uses that exact form, the word's other forms found in real sentences, and practice on the form: which grammar it uses, making the same form from another verb (with learner mistakes as wrong choices), and ordering the sentence (★).
 - Replay the sentence, go back 5 seconds, slow the speech down, or let it move through videos by itself.
 - Each word shows its reading, meaning and **JLPT level**, with how the level was decided (see below), and the lesson of *みんなの日本語* and *GENKI* that teaches it, when one does.
 - **Furigana** over the kanji in the video captions (with an on/off switch), in the example sentences, and in the sentence shown after you answer a practice question.
@@ -60,6 +61,7 @@ Open the address on the phone, then:
 - **Reading and text-grammar passages are original**, written for this site (25 reading passages and 5 text-grammar passages, covering N5 to N1). They follow the JLPT formats but are shorter than real long passages, and they are not about the searched word; they match its level.
 - **Grammar detection is automatic** (the Sudachi tokenizer plus about 300 pattern rules and particle rules, over about 2.3 million sentences from Tatoeba, JESC and Wikipedia), so the counts are a guide, not a complete analysis. A pattern is shown only when it appears with the word in at least 3% of the word's sentences (and at least twice).
 - **Which question types a word gets.** Every word gets example sentences, at least three vocabulary types, a 文章の文法 passage and a reading passage at its level. 文法形式の判断 and 文の組み立て come from sentences with the word; when a word has no grammar pattern of its own (common for rare nouns), the 文法形式 question blanks another grammar point in a sentence that uses the word, and that point is not listed under "Grammar used with this word". Textbook drills are made for verbs, adjectives and nouns; adverbs and particles have none.
+- **How conjugated forms are recognised.** The page undoes the endings with the standard conjugation tables (る-verbs, every う-verb row, する, 来る, 行く, い- and な-adjectives, nouns with the copula), step by step, and checks the result against the dictionary. Where a form can belong to two words (いった: 行く or 言う; きた: 来る or 着る), it picks the easier, more basic one and offers the others. Tested on the 51,000 forms found in the sentences (as the Sudachi tokenizer analysed them): the right word comes first for 96% of them (98% counting how often each form occurs), it is among the other readings offered for another 0.6%, and 2.7% (mostly dialect and slang, such as こだわってん) are not recognised. When no sentence uses the exact form with the searched word, the page shows real sentences with the same grammar and other words.
 - **Subtitles and Wikipedia** give everyday spoken Japanese and written Japanese. Subtitle translations are the film's English subtitles, so they can be loose; Wikipedia sentences have no translation. Each sentence names its source and links to it.
 - On phones the browser may wait for a tap on the video before it plays sound.
 - Saved words and history are kept in the browser you use. The laptop and the phone each have their own list.
@@ -76,7 +78,10 @@ Open the address on the phone, then:
 | `data/grammar.json`, `data/gr/*.json` | Grammar points (level, English meaning, form) and the patterns found with each word |
 | `data/reading.json` | The original reading and text-grammar passages |
 | `tools/build_levels.py` | Combines the JLPT level sources and estimates the rest |
-| `tools/build_corpus.py` | Adds subtitle and Wikipedia sentences, finds the grammar (and particles) used with each word |
+| `tools/build_corpus.py` | Adds subtitle and Wikipedia sentences, finds the grammar (and particles) used with each word, and records each verb's and adjective's conjugated forms |
+| `data/fm/*.json` | Conjugated forms of each verb and adjective as found in the sentences, how often, and a sentence for each |
+| `data/form-fix.json`, `data/form-sig.json` | Which word a form belongs to when it fits two (as the sentences use it), and real sentences for each chain of grammar |
+| `tools/build_form_fix.js` | Builds those two files by running the page's own deinflector over the recorded forms (`node tools/build_form_fix.js`) |
 | `tools/build_dict.py` | Rebuilds `data/dict.json` |
 | `tools/build_examples.py` | Rebuilds `data/ex/` from the Tatoeba exports |
 | `tools/build_jlpt_questions.py` | Rebuilds `data/jlpt-official.json` from the workbook PDFs |

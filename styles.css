@@ -294,6 +294,21 @@ ruby.hit + mark { display: inline-block; line-height: 1.15; padding-block: 0.06e
 .gr-mean { font-size: 0.9375rem; }
 .gr-form, .gr-count { font-size: 0.8125rem; color: var(--ink-2); }
 .gr-col { font-size: 0.875rem; }
+.form-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fs-step { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+.fs-base { border-left-color: var(--accent); }
+.fs-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.fs-arrow { color: var(--ink-2); }
+.fs-form { font: 600 1.25rem/2.1 var(--font-jp); }
+.fs-form rt { font: 400 0.5625rem/1 var(--font-ui); color: var(--ink-2); }
+.fs-what { display: block; font-size: 0.8125rem; color: var(--ink-2); }
+.form-alts { font-size: 0.875rem; margin-top: 10px; }
+.form-alts .chip { margin: 4px 4px 0 0; font: 600 1rem/1.3 var(--font-jp); }
+.form-ex { margin-top: 12px; }
+.form-ex .sub-h { margin-top: 14px; }
+.form-list-wrap { margin-top: 14px; }
+.sub-h { font-size: 0.8125rem; font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
+.form-chip small { white-space: normal; }
 .gr-col b { font: 600 1rem/1.4 var(--font-jp); }
 .gr-label { font-weight: 700; }
 .gr-ex { font: 400 1.0625rem/2.1 var(--font-jp); overflow-wrap: anywhere; }

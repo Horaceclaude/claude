@@ -100,7 +100,8 @@
         }
         dict.entries = E; dict.byText = byText; dict.byReading = byReading; dict.alt = d.kanjiAlt || null;
         dict.look = d.kanjiLook || null; dict.read = d.kanjiRead || null; dict.compounds = d.compounds || null;
-        return true;
+        // which word a form that fits two words belongs to, as the sentence collections use it (おります: 居る, not 降りる)
+        return fetch('data/form-fix.json').then((r) => (r.ok ? r.json() : null)).catch(() => null).then((f) => { dict.formFix = f; return true; });
       })
       .catch(() => false);
     return dict.promise;
@@ -209,40 +210,164 @@
     }
   }
 
-  /* ----- conjugated input (食べた, 高くない, 勉強します) -> its dictionary word ----- */
-  const MASU = { い: 'う', き: 'く', ぎ: 'ぐ', し: 'す', ち: 'つ', に: 'ぬ', び: 'ぶ', み: 'む', り: 'る' };
-  const NAI = { わ: 'う', か: 'く', が: 'ぐ', さ: 'す', た: 'つ', な: 'ぬ', ば: 'ぶ', ま: 'む', ら: 'る' };
-  const ENDS = {
-    masu: ['ませんでした', 'ましょう', 'ました', 'ません', 'ます', 'たかった', 'たくない', 'たい', 'ながら', 'やすい', 'にくい'],
-    te: ['ていました', 'ています', 'てください', 'ていない', 'ている', 'ていた', 'たら', 'たり', 'て', 'た'],
-    de: ['でいました', 'でいます', 'でください', 'でいない', 'でいる', 'でいた', 'だら', 'だり', 'で', 'だ'],
-    nai: ['なかった', 'なければ', 'ないで', 'なくて', 'ない'],
-    adj: ['くなかった', 'くない', 'かった', 'ければ', 'くて', 'く'],
-    na: ['でした', 'です', 'な', 'に', 'だ']
-  };
-  function deinflect(q) {
-    const cands = [];                                   // [dictionary form, inflection class it must have]
-    const strip = (list, fn) => { for (const end of list) if (q.length > end.length && q.endsWith(end)) { fn(q.slice(0, q.length - end.length)); break; } };
-    const last = (b) => b[b.length - 1], cut = (b) => b.slice(0, b.length - 1);
-    strip(ENDS.masu, (b) => { cands.push([b + 'る', /^v1$/]); if (MASU[last(b)]) cands.push([cut(b) + MASU[last(b)], /^v5/]); if (last(b) === 'し') cands.push([cut(b), /^vs$/]); });
-    strip(ENDS.te, (b) => {
-      cands.push([b + 'る', /^v1$/]);
-      if (last(b) === 'っ') for (const k of 'うつる') cands.push([cut(b) + k, /^v5/]);
-      if (last(b) === 'い') cands.push([cut(b) + 'く', /^v5k$/]);
-      if (last(b) === 'し') { cands.push([cut(b) + 'す', /^v5s$/]); cands.push([cut(b), /^vs$/]); }
-    });
-    strip(ENDS.de, (b) => { if (last(b) === 'ん') for (const k of 'むぶぬ') cands.push([cut(b) + k, /^v5/]); if (last(b) === 'い') cands.push([cut(b) + 'ぐ', /^v5g$/]); });
-    strip(ENDS.nai, (b) => { cands.push([b + 'る', /^v1$/]); if (NAI[last(b)]) cands.push([cut(b) + NAI[last(b)], /^v5/]); if (last(b) === 'し') cands.push([cut(b), /^vs$/]); });
-    strip(ENDS.adj, (b) => cands.push([b + 'い', /^adj-i$/]));
-    strip(ENDS.na, (b) => cands.push([b, /^(adj-na|n|vs|adv)$/]));
-    const odd = /^行っ/.test(q) ? '行く' : /^来(た|て|ます|ました|ない|ません|なかった)/.test(q) ? '来る' : /^し(た|て|ます|ました|ない|ません|なかった)(い[るた]|います)?$/.test(q) ? 'する' : '';
-    if (odd) { const hit = lookupExact(odd)[0]; if (hit) return { entry: hit, base: odd }; }
-    for (const c of cands) {
-      const hit = lookupExact(c[0]).find((e) => c[1].test(e.cls) && (e.primary === c[0] || e.kanji.indexOf(c[0]) >= 0 || !isKanaOnly(c[0])));
-      if (hit) return { entry: hit, base: c[0] };
+  /* DEINFLECT START */
+  /* ----- conjugated input (食べさせられなかった, 読んでいる, 高くなかった, 静かだった) -> its dictionary word, and the grammar that made it -----
+     Each rule turns the end of a form back into the end of the form it was made from:
+     { i: inflected ending, b: base ending, ik: what the inflected form conjugates as, bk: what the base must be, g: grammar }.
+     Kinds: v1 る-verb, v5 う-verb, vs する, vk 来る, adj い-adjective, na な-adjective, nn な-adjective or noun, '' a finished form.
+     The rules are the standard conjugation tables (the ones みんなの日本語 and GENKI teach), written out for every verb group. */
+  const DEINFLECT = (() => {
+    const R = [], add = (i, b, ik, bk, g) => R.push({ i, b, ik, bk, g });
+    const ROWS = { u: 'わいうえお', k: 'かきくけこ', g: 'がぎぐげご', s: 'さしすせそ', t: 'たちつてと', n: 'なにぬねの', b: 'ばびぶべぼ', m: 'まみむめも', r: 'らりるれろ' };
+    const TE = { u: 'って', t: 'って', r: 'って', k: 'いて', g: 'いで', s: 'して', n: 'んで', b: 'んで', m: 'んで' };
+    const specs = [{ d: 'る', k: 'v1', neg: '', st: '', te: 'て', ps: ['られる', 'passpot'], cs: 'させる', pt: ['れる'], vo: 'よう', ba: 'れば', im: ['ろ', 'よ'], zu: '' }];
+    for (const r in ROWS) {
+      const w = ROWS[r];
+      specs.push({ d: w[2], k: 'v5', neg: w[0], st: w[1], te: TE[r], ps: [w[0] + 'れる', 'pass'], cs: w[0] + 'せる', pt: [w[3] + 'る'], vo: w[4] + 'う', ba: w[3] + 'ば', im: [w[3]], zu: w[0], row: r });
     }
-    return null;
+    specs.push({ d: 'する', k: 'vs', neg: 'し', st: 'し', te: 'して', ps: ['される', 'pass'], cs: 'させる', pt: ['できる', '出来る'], vo: 'しよう', ba: 'すれば', im: ['しろ', 'せよ'], zu: 'せ' });
+    specs.push({ d: 'くる', k: 'vk', neg: 'こ', st: 'き', te: 'きて', ps: ['こられる', 'passpot'], cs: 'こさせる', pt: ['これる'], vo: 'こよう', ba: 'くれば', im: ['こい'], zu: 'こ' });
+    specs.push({ d: '来る', k: 'vk', neg: '来', st: '来', te: '来て', ps: ['来られる', 'passpot'], cs: '来させる', pt: ['来れる'], vo: '来よう', ba: '来れば', im: ['来い'], zu: '来' });
+    specs.push({ d: '行く', k: 'v5', te: '行って', only: 'te' }, { d: 'いく', k: 'v5', te: 'いって', only: 'te' }, { d: 'ゆく', k: 'v5', te: 'いって', only: 'te' });
+    specs.push({ d: 'う', k: 'v5', te: 'うて', only: 'te' });                     // 問うた, 請うて
+    // one-kanji する-verbs (罰する, 接する) also take 罰さない, 罰せられる
+    specs.push({ d: 'する', k: 'vs', neg: 'さ', st: 'し', te: 'して', ps: ['せられる', 'pass'], cs: 'させる', pt: ['せる'], vo: 'しよう', ba: 'すれば', im: ['せよ'], zu: 'せ' });
+    const POLITE = [['ます', 'masu'], ['ました', 'mashita'], ['ません', 'masen'], ['ませんでした', 'masen-deshita'], ['ましょう', 'mashou'], ['ませんか', 'masen-ka'],
+      ['ましょうか', 'mashou-ka'], ['ますか', 'masu'], ['ましたか', 'mashita'], ['ませんでしたか', 'masen-deshita'], ['ましたら', 'tara'], ['まして', 'te']];
+    const TE_AUX = [['いる', 'v1', 'te-iru'], ['る', 'v1', 'te-iru'], ['おく', 'v5', 'te-oku'], ['しまう', 'v5', 'te-shimau'], ['みる', 'v1', 'te-miru'],
+      ['ある', 'v5', 'te-aru'], ['くる', 'vk', 'te-kuru'], ['来る', 'vk', 'te-kuru'], ['いく', 'v5', 'te-iku'], ['行く', 'v5', 'te-iku'], ['あげる', 'v1', 'te-ageru'],
+      ['くれる', 'v1', 'te-kureru'], ['もらう', 'v5', 'te-morau'], ['いただく', 'v5', 'te-itadaku'], ['くださる', 'v5', 'te-kudasaru'], ['ください', '', 'te-kudasai'],
+      ['くださいませんか', '', 'te-kudasai'], ['くれませんか', '', 'te-kudasai'], ['もいい', 'adj', 'te-mo-ii'], ['もいいです', '', 'te-mo-ii'], ['もかまわない', 'adj', 'te-mo-ii'],
+      ['はいけない', 'adj', 'te-wa-ikenai'], ['はいけません', '', 'te-wa-ikenai'], ['はならない', 'adj', 'te-wa-ikenai'], ['はだめ', '', 'te-wa-ikenai'],
+      ['ほしい', 'adj', 'te-hoshii'], ['欲しい', 'adj', 'te-hoshii'], ['も', '', 'temo'], ['おる', 'v5', 'te-iru'], ['下さい', '', 'te-kudasai'],
+      ['くれ', '', 'te-kure'], ['頂く', 'v5', 'te-itadaku'], ['下さる', 'v5', 'te-kudasaru'], ['置く', 'v5', 'te-oku'], ['仕舞う', 'v5', 'te-shimau'], ['見る', 'v1', 'te-miru']];
+    const STEM = [['たい', 'adj', 'tai'], ['たがる', 'v5', 'tagaru'], ['ながら', '', 'nagara'], ['そう', 'na', 'sou'], ['すぎる', 'v1', 'sugiru'], ['過ぎる', 'v1', 'sugiru'],
+      ['やすい', 'adj', 'yasui'], ['にくい', 'adj', 'nikui'], ['づらい', 'adj', 'nikui'], ['なさい', '', 'nasai'], ['に行く', 'v5', 'ni-iku'], ['にいく', 'v5', 'ni-iku'],
+      ['に来る', 'vk', 'ni-iku'], ['にくる', 'vk', 'ni-iku'], ['方', '', 'kata'], ['かた', '', 'kata'], ['始める', 'v1', 'hajimeru'], ['はじめる', 'v1', 'hajimeru'],
+      ['出す', 'v5', 'dasu'], ['だす', 'v5', 'dasu'], ['続ける', 'v1', 'tsuzukeru'], ['つづける', 'v1', 'tsuzukeru'], ['終わる', 'v5', 'owaru'], ['おわる', 'v5', 'owaru']];
+    for (const S of specs) {
+      const te = S.te, ta = te.replace(/て$/, 'た').replace(/で$/, 'だ'), base = te.slice(0, -1), voiced = /で$/.test(te);
+      add(ta, S.d, '', S.k, 'ta'); add(ta + 'ら', S.d, '', S.k, 'tara'); add(ta + 'り', S.d, '', S.k, 'tari'); add(te, S.d, '', S.k, 'te');
+      for (const [x, k, g] of TE_AUX) add(te + x, S.d, k, S.k, g);
+      add(base + (voiced ? 'じゃう' : 'ちゃう'), S.d, 'v5', S.k, 'te-shimau'); add(base + (voiced ? 'どく' : 'とく'), S.d, 'v5', S.k, 'te-oku');
+      add(base + (voiced ? 'じゃいけない' : 'ちゃいけない'), S.d, 'adj', S.k, 'te-wa-ikenai'); add(base + (voiced ? 'じゃだめ' : 'ちゃだめ'), S.d, '', S.k, 'te-wa-ikenai');
+      if (S.only) continue;
+      for (const [x, g] of POLITE) add(S.st + x, S.d, '', S.k, g);
+      for (const [x, k, g] of STEM) add(S.st + x, S.d, k, S.k, g);
+      add(S.neg + 'ない', S.d, 'adj', S.k, 'nai');
+      add(S.zu + 'ず', S.d, '', S.k, 'zu'); add(S.zu + 'ずに', S.d, '', S.k, 'zu');
+      add(S.neg + 'ないで', S.d, '', S.k, 'naide'); add(S.neg + 'ないでください', S.d, '', S.k, 'naide-kudasai');
+      for (const [x, k] of [['なければならない', 'adj'], ['なければなりません', ''], ['なくてはいけない', 'adj'], ['なくてはいけません', ''], ['なくてはならない', 'adj'],
+        ['なければいけない', 'adj'], ['なきゃ', ''], ['なくちゃ', ''], ['なきゃいけない', 'adj'], ['なくちゃいけない', 'adj']]) add(S.neg + x, S.d, k, S.k, 'nakereba');
+      add(S.neg + 'なくてもいい', S.d, 'adj', S.k, 'nakute-mo-ii');
+      add(S.ps[0], S.d, 'v1', S.k, S.ps[1]);
+      for (const p of S.pt) add(p, S.d, 'v1', S.k, 'pot');
+      add(S.cs, S.d, 'v1', S.k, 'caus');
+      if (S.k === 'v5' && S.row !== 's') add(S.neg + 'される', S.d, 'v1', S.k, 'causpass');      // 書かされる: the short causative-passive
+      add(S.vo, S.d, '', S.k, 'vol'); add(S.vo + 'と思う', S.d, 'v5', S.k, 'vol'); add(S.vo + 'とおもう', S.d, 'v5', S.k, 'vol');
+      add(S.ba, S.d, '', S.k, 'ba');
+      for (const m of S.im) add(m, S.d, '', S.k, 'imp');
+      add(S.d + 'な', S.d, '', S.k, 'proh');
+      add(S.d + 'こと', S.d, '', S.k, 'koto');
+      add(S.d + 'だろう', S.d, '', S.k, 'darou'); add(S.d + 'でしょう', S.d, '', S.k, 'deshou');
+      for (const x of ['べき', 'べきだ', 'べきです', 'べきではない', 'べきじゃない']) add(S.d + x, S.d, '', S.k, 'beki');
+      if (S.k === 'vs') add('すべき', S.d, '', S.k, 'beki');
+      add(S.d + 'らしい', S.d, 'adj', S.k, 'rashii');
+      add(S.zu + 'ぬ', S.d, '', S.k, 'nai');                                       // 知らぬ, せぬ: written negative
+      if (S.k === 'v5') add(S.neg + 'ん', S.d, '', S.k, 'nai');                   // 構わん, 分からん: spoken negative
+      if (S.st) add(S.st, S.d, '', S.k, 'renyou');                                 // 書き、 / 勉強し、: the continuative stem
+      add(S.d + 'つもり', S.d, '', S.k, 'tsumori');
+    }
+    // る-verbs (and the る-verb-like 〜られる, 〜させる, 〜ている): the continuative stem is the word without る (食べ、, 解消され、, 意味しており)
+    for (const c of 'えけげせぜてでねへべぺめれいきぎしじちぢにひびぴみり') add(c, c + 'る', '', 'v1', 'renyou');
+    // い-adjectives (ない and 〜たい change the same way: 食べなかった, 食べたくない)
+    for (const [i, ik, g] of [['かった', '', 'adj-ta'], ['かったです', '', 'adj-ta'], ['くない', 'adj', 'adj-nai'], ['くないです', '', 'adj-nai'], ['くありません', '', 'adj-nai'],
+      ['くなかったです', '', 'adj-nakatta'], ['くありませんでした', '', 'adj-nakatta'], ['くて', '', 'adj-te'], ['く', '', 'adj-adv'], ['ければ', '', 'adj-ba'],
+      ['かったら', '', 'adj-tara'], ['くても', '', 'adj-temo'], ['さ', '', 'adj-sa'], ['そう', 'na', 'adj-sou'], ['すぎる', 'v1', 'adj-sugiru'], ['過ぎる', 'v1', 'adj-sugiru'],
+      ['くなる', 'v5', 'adj-naru'], ['がる', 'v5', 'adj-garu'], ['いです', '', 'adj-desu'], ['くする', 'vs', 'adj-suru'], ['いだろう', '', 'darou'],
+      ['いでしょう', '', 'deshou'], ['かろう', '', 'darou'], ['き', '', 'adj-ki'], ['いらしい', 'adj', 'rashii'], ['いべき', '', 'beki']]) add(i, 'い', ik, 'adj', g);
+    // な-adjectives (and nouns for the copula forms)
+    for (const [i, ik, bk, g] of [['だ', '', 'nn', 'na-da'], ['です', '', 'nn', 'na-desu'], ['だった', '', 'nn', 'na-ta'], ['でした', '', 'nn', 'na-deshita'],
+      ['じゃない', 'adj', 'nn', 'na-nai'], ['ではない', 'adj', 'nn', 'na-nai'], ['じゃありません', '', 'nn', 'na-nai'], ['ではありません', '', 'nn', 'na-nai'],
+      ['じゃないです', '', 'nn', 'na-nai'], ['じゃありませんでした', '', 'nn', 'na-nakatta'], ['ではありませんでした', '', 'nn', 'na-nakatta'],
+      ['な', '', 'na', 'na-na'], ['に', '', 'na', 'na-ni'], ['で', '', 'na', 'na-de'], ['なら', '', 'nn', 'na-nara'], ['だったら', '', 'nn', 'na-tara'],
+      ['そう', 'na', 'na', 'na-sou'], ['すぎる', 'v1', 'na', 'na-sugiru'], ['になる', 'v5', 'nn', 'na-naru'], ['にする', 'vs', 'na', 'na-suru'], ['さ', '', 'na', 'adj-sa'],
+      ['である', 'v5', 'nn', 'na-dearu'], ['であった', '', 'nn', 'na-ta'], ['であり', '', 'nn', 'na-dearu'], ['でない', 'adj', 'nn', 'na-nai'],
+      ['だろう', '', 'nn', 'darou'], ['でしょう', '', 'nn', 'deshou'], ['ではなく', '', 'nn', 'na-nai'], ['でなく', '', 'nn', 'na-nai'], ['らしい', 'adj', 'nn', 'rashii'],
+      ['ではある', 'v5', 'nn', 'na-dearu'], ['でなければ', '', 'nn', 'na-nai']]) add(i, '', ik, bk, g);
+    const byLast = new Map();
+    for (const r of R) { const c = r.i[r.i.length - 1]; if (!byLast.has(c)) byLast.set(c, []); byLast.get(c).push(r); }
+    return { rules: R, byLast: byLast };
+  })();
+  // Does a dictionary entry fit the kind a rule needs? する-forms need a する-noun (勉強する) or する itself.
+  function entriesFor(base, kind) {
+    if (kind === 'vs') {
+      if (!/する$/.test(base)) return [];
+      const noun = base.slice(0, -2);
+      if (!noun) return lookupExact('する').filter((e) => e.rawCls === 'vx' || e.cls === 'vx');
+      const whole = lookupExact(base).filter((e) => e.rawCls === 'vx' && (e.kanji.indexOf(base) >= 0 || e.kana.indexOf(base) >= 0));   // 罰する, 接する
+      return whole.concat(lookupExact(noun).filter((e) => e.cls === 'vs'));
+    }
+    if (!base) return [];
+    return lookupExact(base).filter((e) => {
+      if (!(e.primary === base || e.kanji.indexOf(base) >= 0 || e.kana.indexOf(base) >= 0)) return false;
+      if (kind === 'v1') return e.cls === 'v1' && e.rawCls !== 'vx';             // 来る only through its own rules
+      if (kind === 'v5') return /^v5/.test(e.cls);
+      if (kind === 'vk') return e.rawCls === 'vx' && /(来る|くる)$/.test(base);
+      if (kind === 'adj') return e.cls === 'adj-i' || e.cls === 'adjx';
+      if (kind === 'na') return e.cls === 'adj-na';
+      if (kind === 'nn') return /^(adj-na|n|vs)$/.test(e.cls);
+      return false;
+    });
   }
+  // All the ways the text can be a form of a dictionary word; each with its steps from the dictionary form outwards.
+  function deinflectAll(q) {
+    const out = [], seen = new Set(), queue = [{ s: q, k: '', steps: [] }];
+    let n = 0;
+    while (queue.length && n++ < 400) {
+      const node = queue.shift();
+      if (node.steps.length >= 7) continue;
+      for (const r of (DEINFLECT.byLast.get(node.s[node.s.length - 1]) || [])) {
+        if (!node.s.endsWith(r.i) || (node.k && r.ik !== node.k && !(node.k === 'nn' && r.ik === 'na'))) continue;
+        const stem = node.s.slice(0, node.s.length - r.i.length);
+        if (!stem && r.b.length < 2 && r.bk !== 'vs') continue;          // a rule may cover a whole word (行った, きた, した), not leave nothing
+        const base = stem + r.b, key = base + '|' + r.bk;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const steps = [{ g: r.g, form: node.s }].concat(node.steps);
+        for (const e of entriesFor(base, r.bk)) out.push({ entry: e, base: base, kind: r.bk, steps: steps });
+        if (base.length >= 1) queue.push({ s: base, k: r.bk, steps: steps });
+      }
+    }
+    // the shortest explanation first (できない is 出来る + ない, not する + potential + ない), then the word the sentences use with this
+    // exact form (dict.formFix, counted in the corpus), then the easier word (行った: 行く before 行う), the core irregular verbs
+    // (きた: 来る before 着る), and the more common one
+    const ease = (o) => o.entry.jlpt || 0, core = (o) => (o.entry.rawCls === 'vx' ? 0 : 1);
+    const fix = dict.formFix && dict.formFix[q], fixed = (o) => (fix && o.entry.id === fix ? 0 : 1);
+    out.sort((a, b) => fixed(a) - fixed(b) || a.steps.length - b.steps.length || ease(b) - ease(a) || core(a) - core(b) || a.entry.rank - b.entry.rank);
+    const best = [], ids = new Set();
+    for (const o of out) if (!ids.has(o.entry.id)) { ids.add(o.entry.id); best.push(o); }
+    return best;
+  }
+  function deinflect(q) {
+    let all = deinflectAll(q);
+    const bare = q.replace(/(か|ね|よ|の|ぞ|わ|よね)+$/, '');               // 書いてもいいですか, 行きましょうね
+    if (!all.length && bare && bare !== q) all = deinflectAll(bare);
+    if (!all.length) return null;
+    const top = all[0];
+    return { entry: top.entry, base: top.base, kind: top.kind, steps: mergeSteps(top.steps), alts: all.slice(1, 4) };
+  }
+  // 食べさせる (causative) + られる (passive) are taught as one form: 使役受身形.
+  function mergeSteps(steps) {
+    const out = [];
+    for (const s of steps) {
+      const prev = out[out.length - 1];
+      if (prev && prev.g === 'caus' && /^(pass|passpot)$/.test(s.g)) { out[out.length - 1] = { g: 'causpass', form: s.form }; continue; }
+      out.push(s);
+    }
+    return out;
+  }
+  /* DEINFLECT END */
 
   /* ---------- word details + kana hints (needs the dictionary) ---------- */
   function showWord(query) {
@@ -252,7 +377,7 @@
     if (base) e = base.entry;
     state.entry = e;
     $('#word-main').textContent = query;
-    const reading = base ? 'a form of ' + base.base + (e.kana[0] !== base.base ? '（' + e.kana[0] + '）' : '') : (e && e.kana[0] !== query ? e.kana[0] : '');
+    const reading = base ? 'a form of ' + e.primary + (e.kana[0] !== e.primary ? '（' + e.kana[0] + '）' : '') : (e && e.kana[0] !== query ? e.kana[0] : '');
     $('#word-reading').textContent = reading;
     // A kana query that is the reading of several kanji words has no single meaning to show.
     // A kana query is ambiguous when other words with that reading are about as common: はし (橋, 端, 箸) is, あめ (雨, 飴) is not.
@@ -269,7 +394,7 @@
     $('#word').hidden = false;
     renderSaveButton();
     renderLevel(showGloss ? e : null);
-    renderStudy(e, query, !!kanaAmbiguous);
+    renderStudy(e, query, !!kanaAmbiguous, base);
   }
   function kanaHints(query, seq) {
     if (!isKanaOnly(query)) return;
@@ -708,7 +833,11 @@
     return runs.map((r) => ({ t: r, r: isKanji(r) ? m[g++] : '' }));
   }
   // Counting words the tokenizer reads digit by digit (一人 as いち+にん).
-  const FIXED = { 一人: 'ひとり', 二人: 'ふたり', 一つ: 'ひとつ', 二つ: 'ふたつ', 三つ: 'みっつ', 四つ: 'よっつ', 五つ: 'いつつ', 六つ: 'むっつ', 七つ: 'ななつ', 八つ: 'やっつ', 九つ: 'ここのつ', 二十歳: 'はたち', 一日中: 'いちにちじゅう' };
+  const FIXED = { 一人: 'ひとり', 二人: 'ふたり', 一つ: 'ひとつ', 二つ: 'ふたつ', 三つ: 'みっつ', 四つ: 'よっつ', 五つ: 'いつつ', 六つ: 'むっつ', 七つ: 'ななつ', 八つ: 'やっつ', 九つ: 'ここのつ', 二十歳: 'はたち', 一日中: 'いちにちじゅう',
+    // grammar terms: the tokenizer reads 形 as かた/がた here, but the textbooks say けい
+    使役受身形: 'しえきうけみけい', 受身形: 'うけみけい', 可能形: 'かのうけい', 命令形: 'めいれいけい', 意向形: 'いこうけい', 使役形: 'しえきけい',
+    条件形: 'じょうけんけい', 辞書形: 'じしょけい', 連用形: 'れんようけい', 中止形: 'ちゅうしけい', 普通形: 'ふつうけい', 否定形: 'ひていけい',
+    過去否定形: 'かこひていけい', 過去形: 'かこけい', 丁寧形: 'ていねいけい', ていねい形: 'ていねいけい', 文型練習: 'ぶんけいれんしゅう', 活用: 'かつよう' };
   const RE_FIXED = new RegExp('(' + Object.keys(FIXED).sort((x, y) => y.length - x.length).join('|') + ')');
   function captionSegs(text) {
     const segs = [];
@@ -800,9 +929,11 @@
     box.hidden = seen.size === 0;
   }
 
-  function renderStudy(e, query, ambiguous) {
+  function renderStudy(e, query, ambiguous, formInfo) {
     const my = ++study.seq;
     study.entry = ambiguous ? null : e; study.query = query; study.examples = []; study.showAll = false;
+    study.formInfo = ambiguous ? null : (formInfo || null); study.formRow = null;
+    $('#form').hidden = true;
     $('#study').hidden = false;
     $('#examples-list').textContent = '';
     $('#official-list').textContent = '';
@@ -831,6 +962,7 @@
       renderDrills();
       renderPractice();
       renderGrammarPractice();
+      renderForm(e, query, study.formInfo, my);
     });
   }
   // Text that is not one dictionary word (a phrase, a name): offer the dictionary words inside it, each with its own examples and practice.
@@ -1893,6 +2025,11 @@
     const e = study.entry, box = $('#drill-practice');
     box.textContent = '';
     const cards = [];
+    if (e && study.formInfo) {                       // a conjugated form was searched: practise that form first
+      const a = formIdentify(study.query, study.formInfo), b = formDrill(e, study.query, study.formInfo);
+      if (a) cards.push(a);
+      if (b) cards.push(b);
+    }
     if (e) {
       const level = e.jlpt || 1, vk = /^v/.test(e.cls) ? verbKind(e) : null;
       if (vk) {
@@ -1912,6 +2049,248 @@
       box.appendChild(questionCard(s));
     });
     $('#sec-drill').hidden = cards.length === 0;
+  }
+
+  /* ---------- a conjugated form: how it is made, sentences that use it, and practice on it ---------- */
+  // [label, JLPT level, what it means, OpenJLPT id for the formation note]
+  const FORM_LABEL = {
+    masu: ['〜ます（ていねい形）', 5, 'polite form: does; will do', 'masu'], mashita: ['〜ました', 5, 'polite past: did', 'mashita'],
+    masen: ['〜ません', 5, 'polite negative: does not', 'masen'], 'masen-deshita': ['〜ませんでした', 5, 'polite past negative: did not', 'masen-deshita'],
+    mashou: ['〜ましょう', 5, "let's (polite)", 'mashou'], 'masen-ka': ['〜ませんか', 5, "won't you…? (polite invitation)", 'masen-ka'], 'mashou-ka': ['〜ましょうか', 5, 'shall I / shall we…?', 'mashou-ka'],
+    ta: ['た形（過去）', 5, 'plain past: did', 'ta'], te: ['て形', 5, 'te-form: and; and then (joins actions)', 'te'], tara: ['〜たら', 4, 'if; when; after', 'tara'],
+    tari: ['〜たり', 5, 'doing things like…', 'tari-tari-suru'], temo: ['〜ても', 4, 'even if', 'te-mo-de-mo'],
+    nai: ['ない形（否定）', 5, 'plain negative: does not', 'nai'], zu: ['〜ず／〜ずに', 3, 'without doing (written style)', 'zu-ni'], naide: ['〜ないで', 4, 'without doing; instead of doing', 'naide'],
+    'naide-kudasai': ['〜ないでください', 5, "please don't", 'naide-kudasai'], nakereba: ['〜なければならない', 5, 'must; have to', 'nakereba-naranai-nakute-wa-ikenai'],
+    'nakute-mo-ii': ['〜なくてもいい', 5, "don't have to", 'nakute-mo-ii'],
+    pot: ['可能形', 4, 'potential: can do', 'eru-rareru-potential'], pass: ['受身形', 4, 'passive: is done (by someone)', 'reru-rareru-passive'],
+    passpot: ['受身形／可能形（〜られる）', 4, 'passive (is done) or potential (can do): for る-verbs and 来る the two forms are the same; the sentence tells which', 'reru-rareru-passive'],
+    caus: ['使役形', 4, 'causative: make or let someone do', 'seru-saseru'], causpass: ['使役受身形', 3, "causative-passive: is made to do (against one's will)", ''],
+    vol: ['意向形', 4, "volitional: let's; I'll (〜と思う: I think I'll)", 'ou-you'], ba: ['条件形（〜ば）', 4, 'conditional: if', 'ba'], imp: ['命令形', 4, 'imperative: do it! (blunt command)', 'e-ro'],
+    proh: ['〜な（禁止）', 4, "don't! (strong prohibition)", 'na-prohibition'], koto: ['〜こと', 4, 'the act of doing (makes a verb a noun)', ''], tsumori: ['〜つもり', 4, 'intend to', 'tsumori'],
+    tai: ['〜たい', 5, 'want to', 'tai'], tagaru: ['〜たがる', 4, '(someone else) wants to', 'tagaru'], nagara: ['〜ながら', 5, 'while doing', 'nagara'],
+    sou: ['〜そうだ（様子）', 4, 'looks like; is about to', 'sou-da-appearance'], sugiru: ['〜すぎる', 4, 'too much; over-', 'sugiru'], yasui: ['〜やすい', 4, 'easy to', 'yasui-nikui'],
+    nikui: ['〜にくい', 4, 'hard to', 'yasui-nikui'], nasai: ['〜なさい', 4, 'do (an instruction, e.g. to a child)', 'nasai'], 'ni-iku': ['〜に行く／〜に来る', 5, 'go / come to do', 'ni-iku'],
+    kata: ['〜方', 4, 'how to; the way of doing', 'kata'], hajimeru: ['〜始める', 4, 'start doing', 'hajimeru-owaru-tsuzukeru'], dasu: ['〜出す', 4, 'suddenly start doing', 'dasu'],
+    tsuzukeru: ['〜続ける', 4, 'keep doing', 'hajimeru-owaru-tsuzukeru'], owaru: ['〜終わる', 4, 'finish doing', 'hajimeru-owaru-tsuzukeru'],
+    'te-iru': ['〜ている', 5, 'is doing (now); is in a state (as a result)', 'te-iru'], 'te-oku': ['〜ておく', 4, 'do in advance; leave as is', 'te-oku'],
+    'te-shimau': ['〜てしまう（〜ちゃう）', 4, 'do completely; end up doing (often with regret)', 'te-shimau-chau'], 'te-miru': ['〜てみる', 4, 'try doing (to see)', 'te-miru'],
+    'te-aru': ['〜てある', 4, 'has been done (and stays so)', 'te-aru'], 'te-kuru': ['〜てくる', 4, 'do and come back; has been changing up to now', 'te-kuru'],
+    'te-iku': ['〜ていく', 4, 'do and go; will go on changing', 'te-iku'], 'te-ageru': ['〜てあげる', 4, 'do for someone', 'te-ageru'],
+    'te-kureru': ['〜てくれる', 4, 'someone does for me', 'te-kureru'], 'te-morau': ['〜てもらう', 4, 'have someone do (for me)', 'te-morau'],
+    'te-itadaku': ['〜ていただく', 4, 'have someone do (humble)', 'te-kudasaru-te-itadaku'], 'te-kudasaru': ['〜てくださる', 4, 'someone kindly does (honorific)', 'te-kudasaru-te-itadaku'],
+    'te-kudasai': ['〜てください', 5, 'please do', 'te-kudasai'], 'te-mo-ii': ['〜てもいい', 5, 'may; it is all right to', 'te-mo-ii'],
+    'te-wa-ikenai': ['〜てはいけない', 5, 'must not', 'te-wa-ikenai'], 'te-hoshii': ['〜てほしい', 4, 'want someone to do', 'te-hoshii'],
+    'adj-ta': ['〜かった（過去）', 5, 'past: was (ない and 〜たい change like い-adjectives: なかった, たかった)', 'ku-nai-katta-ku-nakatta'],
+    'adj-nai': ['〜くない（否定）', 5, 'negative: is not', 'ku-nai-katta-ku-nakatta'], 'adj-nakatta': ['〜くなかった', 5, 'past negative: was not', 'ku-nai-katta-ku-nakatta'],
+    'adj-te': ['〜くて', 5, 'and (joins)', 'kute-de'], 'adj-adv': ['〜く（副詞）', 5, 'adverb: -ly (はやく = quickly)', ''], 'adj-ba': ['〜ければ', 4, 'if', 'ba'],
+    'adj-tara': ['〜かったら', 4, 'if; when', 'tara'], 'adj-temo': ['〜くても', 4, 'even if', 'te-mo-de-mo'], 'adj-sa': ['〜さ', 4, '-ness (たかさ = height)', 'sa'],
+    'adj-sou': ['〜そうだ（様子）', 4, 'looks', 'sou-da-appearance'], 'adj-sugiru': ['〜すぎる', 4, 'too', 'sugiru'], 'adj-naru': ['〜くなる', 5, 'become', 'ku-naru-ni-naru'],
+    'adj-garu': ['〜がる', 4, '(someone else) shows signs of feeling', 'garu'], 'adj-desu': ['〜いです', 5, 'polite: is', 'desu'], 'adj-suru': ['〜くする', 4, 'make (something) so', 'ku-suru-ni-suru'],
+    'na-da': ['〜だ', 5, 'is (plain)', 'da'], 'na-desu': ['〜です', 5, 'is (polite)', 'desu'], 'na-ta': ['〜だった', 5, 'was (plain)', 'da'], 'na-deshita': ['〜でした', 5, 'was (polite)', 'deshita'],
+    'na-nai': ['〜じゃない／〜ではない', 5, 'is not', 'de-wa-arimasen-ja-nai'], 'na-nakatta': ['〜じゃなかった／〜ではありませんでした', 5, 'was not', 'de-wa-arimasen-ja-nai'],
+    'na-na': ['〜な＋名詞', 5, 'before a noun (しずかな町)', 'na-na-adjective'], 'na-ni': ['〜に（副詞）', 5, 'adverb: -ly (しずかに)', ''], 'na-de': ['〜で', 5, 'and (joins)', 'kute-de'],
+    'na-nara': ['〜なら', 4, 'if', 'nara'], 'na-tara': ['〜だったら', 4, 'if; when', 'tara'], 'na-sou': ['〜そうだ（様子）', 4, 'looks', 'sou-da-appearance'],
+    'na-sugiru': ['〜すぎる', 4, 'too', 'sugiru'], 'na-naru': ['〜になる', 5, 'become', 'ku-naru-ni-naru'], 'na-suru': ['〜にする', 4, 'make (something) so', 'ku-suru-ni-suru'],
+    'na-dearu': ['〜である', 3, 'is (written style; である・であり・であった)', ''], darou: ['〜だろう', 4, 'probably; I suppose (plain)', 'darou'],
+    deshou: ['〜でしょう', 5, 'probably (polite)', 'deshou'], renyou: ['連用形（中止形）', 3, 'the continuative stem: "…and" in written Japanese (読み、書き), and the base other endings attach to', ''],
+    'te-kure': ['〜てくれ', 4, 'do it for me (blunt request)', 'te-kureru'], beki: ['〜べきだ', 3, 'should; ought to', 'beki-da-beki-de-wa-nai'],
+    rashii: ['〜らしい', 4, 'it seems; I hear that', 'rashii'], 'adj-ki': ['〜き（古い形）', 1, 'old attributive form (よき, 良き)', '']
+  };
+  const formLabel = (g) => FORM_LABEL[g] || [g, 5, '', ''];
+  const FORM_HOW = {
+    causpass: 'る-verb stem + させられる (食べさせられる); う-verb ない-stem + せられる, or the short される (書かせられる / 書かされる); する → させられる; 来る → こさせられる',
+    renyou: 'the ます-stem: 食べ, 書き, し, 来 (き)', 'adj-adv': 'い-adjective stem + く (高い → 高く)', 'na-ni': 'な-adjective + に (静か → 静かに)',
+    'na-dearu': 'noun / な-adjective + である', koto: 'dictionary form + こと', 'adj-ki': 'い-adjective stem + き', passpot: 'る-verb stem + られる (食べられる); 来る → こられる',
+    'te-kure': 'Verb-te + くれ', 'adj-nakatta': 'い-adjective stem + くなかった'
+  };
+  const shortLabel = (g) => formLabel(g)[0].replace(/（[^）]*）$/, '');
+  // Apply grammar to a dictionary form, the way the rules above undo it: 食べる + [caus, pass, ta] -> 食べさせられた.
+  function forwardForm(base, kind, gids) {
+    let cur = base, k = kind;
+    const list = [];
+    for (const g of gids) { if (g === 'causpass') list.push('caus', 'pass'); else list.push(g); }
+    for (let g of list) {
+      if ((g === 'pass' || g === 'pot') && (k === 'v1' || k === 'vk')) g = 'passpot';      // 食べられる, 食べさせられる, 来られる
+      let best = null;
+      for (const r of DEINFLECT.rules) {
+        const kindOk = r.bk === k || (k === 'na' && r.bk === 'nn') || (k === 'nn' && r.bk === 'na');
+        if (r.g !== g || !kindOk || !cur.endsWith(r.b) || (k === 'vk' && !/^(く|来)/.test(r.b))) continue;
+        if (!best || r.b.length > best.b.length) best = r;
+      }
+      if (!best) return null;
+      cur = cur.slice(0, cur.length - best.b.length) + best.i; k = best.ik || k;
+    }
+    return cur;
+  }
+  function renderForm(e, query, info, my) {
+    const box = $('#form'), steps = $('#form-steps'), exBox = $('#form-ex'), list = $('#form-list'), alts = $('#form-alts');
+    steps.textContent = ''; exBox.textContent = ''; list.textContent = ''; alts.textContent = '';
+    box.hidden = true; alts.hidden = true; $('#form-list-wrap').hidden = true; steps.hidden = !info;
+    study.formRow = null;
+    if (!e) return Promise.resolve();
+    const meta = study.grammarMeta;
+    if (info) {
+      $('#form-title').textContent = '';
+      $('#form-title').appendChild(document.createTextNode('How '));
+      $('#form-title').appendChild(el('span', { lang: 'ja' }, query));
+      $('#form-title').appendChild(document.createTextNode(' is made'));
+      const first = el('li', { class: 'fs-step fs-base' });
+      const w = el('span', { class: 'fs-form', lang: 'ja' }, info.base);
+      first.appendChild(w); furiganize(w, info.base);
+      first.appendChild(el('span', { class: 'fs-what' }, 'dictionary form of ' + e.primary + ' (' + e.gloss.split(';')[0] + ')'));
+      steps.appendChild(first);
+      for (const s of info.steps) {
+        const L = formLabel(s.g), li = el('li', { class: 'fs-step' });
+        const head = el('div', { class: 'fs-head' });
+        const f = el('span', { class: 'fs-form', lang: 'ja' }, s.form);
+        head.appendChild(el('span', { class: 'fs-arrow', 'aria-hidden': 'true' }, '→'));
+        head.appendChild(f); furiganize(f, s.form);
+        head.appendChild(el('span', { class: 'gr-pat', lang: 'ja' }, L[0]));
+        head.appendChild(el('span', { class: 'jlpt-mini', 'data-level': String(L[1]) }, 'N' + L[1]));
+        li.appendChild(head);
+        li.appendChild(el('p', { class: 'gr-mean' }, L[2]));
+        const p = meta && L[3] && meta.points[L[3]], how = (p && p[3]) || FORM_HOW[s.g];
+        if (how) { const fp = el('p', { class: 'gr-form' }); fp.appendChild(el('span', { class: 'gr-label' }, 'How it attaches: ')); fp.appendChild(document.createTextNode(how)); li.appendChild(fp); }
+        steps.appendChild(li);
+      }
+      if (info.alts && info.alts.length) {
+        alts.appendChild(document.createTextNode('It can also be read as a form of: '));
+        info.alts.forEach((a) => { const b = el('button', { type: 'button', class: 'chip', lang: 'ja' }, a.entry.primary); b.addEventListener('click', () => submitSearch(a.entry.primary)); alts.appendChild(b); });
+        alts.hidden = false;
+      }
+      box.hidden = false;
+    } else {
+      $('#form-title').textContent = 'This word in its different forms';
+    }
+    if (!/^(v|adj-i|adjx|adj-na)/.test(e.cls) && !info) return Promise.resolve();
+    const sigs = info ? loadJSON('data/form-sig.json') : Promise.resolve(null);
+    return Promise.all([loadJSON('data/fm/' + String(e.id % 64).padStart(2, '0') + '.json'), sigs]).then(([sh, sig]) => {
+      if (my !== study.seq) return;
+      const rows = (sh && sh[e.id]) || [];
+      const sentence = (x, mark) => {
+        const b = parseBraces(x[0]), ja = el('p', { class: 'gr-ex', lang: 'ja' });
+        drawRuby(ja, b.segs, [mark]);
+        exBox.appendChild(ja);
+        const en = x[1] || NO_EN[x[6]] || '';
+        if (en) exBox.appendChild(el('p', { class: 'ex-en' + (x[1] ? '' : ' muted') }, en));
+        const src = el('p', { class: 'ex-src' }); sourceLine(src, x[6] || 't', x[2], x[7] || '', false); exBox.appendChild(src);
+      };
+      if (info) {
+        let row = rows.find((r) => r[0] === query), note = '';
+        const same = !row && sig ? (sig[info.steps.map((st) => st.g).join('+')] || []).filter((x) => x[1] !== e.primary).slice(0, 2) : [];
+        if (same.length) {                 // nobody used this exact form with this word: the same grammar with other words, from real sentences
+          exBox.appendChild(el('h3', { class: 'sub-h' }, 'The same grammar in real sentences, with other words:'));
+          for (const x of same) {
+            const r = x[2];
+            sentence([r[0], r[1], r[2], 0, 0, 0, r[6], r[7]], [r[3], r[4], 'mark']);
+            exBox.lastChild.appendChild(document.createTextNode(' · ' + x[0] + ' is a form of ' + x[1]));
+          }
+        }
+        if (!row) {
+          const common = (a) => { let i = 0; while (i < a.length && i < query.length && a[i] === query[i]) i++; return i; };
+          row = rows.slice().sort((a, b) => common(b[0]) - common(a[0]) || b[1] - a[1])[0];
+          if (row) note = 'No sentence in the collections uses exactly ' + query + ' with this word. Its nearest form in a real sentence is ' + row[0] + ':';
+        }
+        if (row) {
+          study.formRow = row;
+          exBox.appendChild(el('h3', { class: 'sub-h' }, note || 'In a real sentence'));
+          const x = row[2];
+          sentence(x, [x[3], x[4], 'mark']);
+        }
+      }
+      const shown = rows.filter((r) => r[0] !== query).slice(0, 12);
+      for (const r of shown) {
+        const d = deinflect(r[0]);
+        if (!d || d.entry.id !== e.id) continue;
+        const b = el('button', { type: 'button', class: 'chip form-chip' });
+        b.appendChild(el('b', { lang: 'ja' }, r[0]));
+        b.appendChild(el('small', null, d.steps.map((s) => shortLabel(s.g)).join(' + ') + ' · ' + r[1]));
+        b.addEventListener('click', () => submitSearch(r[0]));
+        list.appendChild(b);
+      }
+      if (list.children.length) { $('#form-list-wrap').hidden = false; box.hidden = false; }
+      if (info && study.formRow) renderFormStar();
+    });
+  }
+  // Practice on the form itself: which grammar it uses, making the same form from another word, and ordering its sentence.
+  const FORM_GROUPS = [['pass', 'caus', 'pot', 'causpass', 'passpot'], ['vol', 'ba', 'imp', 'tara', 'proh'], ['te-iru', 'te-oku', 'te-shimau', 'te-miru', 'te-aru', 'te-kuru', 'te-iku'],
+    ['tai', 'tagaru', 'sou', 'sugiru', 'yasui', 'nikui', 'nagara'], ['ta', 'te', 'nai', 'masu', 'mashita', 'masen', 'zu', 'naide'], ['te-ageru', 'te-kureru', 'te-morau'],
+    ['te-kudasai', 'te-mo-ii', 'te-wa-ikenai', 'nakereba'], ['adj-ta', 'adj-nai', 'adj-te', 'adj-adv', 'adj-ba', 'adj-naru', 'adj-sou', 'adj-sa'],
+    ['na-ta', 'na-nai', 'na-na', 'na-ni', 'na-de', 'na-naru', 'na-sou']];
+  function formIdentify(query, info) {
+    const gids = info.steps.map((s) => s.g);
+    const core = info.steps.slice().sort((a, b) => formLabel(a.g)[1] - formLabel(b.g)[1])[0].g;   // the most advanced grammar in it
+    const group = FORM_GROUPS.find((gr) => gr.indexOf(core) >= 0) || FORM_GROUPS[4];
+    const pool = shuffle(group).concat(shuffle([].concat(...FORM_GROUPS)));
+    const wrong = [];
+    for (const g of pool) {
+      if (g === core || gids.indexOf(g) >= 0 || wrong.indexOf(g) >= 0) continue;
+      if ((core === 'passpot' && /^(pass|pot)$/.test(g)) || (/^(pass|pot)$/.test(core) && g === 'passpot') || (core === 'causpass' && /^(caus|pass|passpot)$/.test(g))) continue;
+      if (formLabel(g)[0] === formLabel(core)[0]) continue;
+      wrong.push(g);
+      if (wrong.length >= 3) break;
+    }
+    if (wrong.length < 3) return null;
+    const opts = shuffle([core].concat(wrong));
+    return { kicker: '文法の確認', instr: '「' + query + '」に 使われて いる 文法は どれですか。', stem: query, opts: opts.map((g) => formLabel(g)[0]), ans: opts.indexOf(core),
+      after: (b) => info.steps.forEach((s) => { const q = el('p', { class: 'q-gram' }); q.appendChild(el('b', { lang: 'ja' }, s.form)); q.appendChild(document.createTextNode('  ' + formLabel(s.g)[0] + ': ' + formLabel(s.g)[2])); b.appendChild(q); }) };
+  }
+  function formDrill(e, query, info) {
+    const gids = info.steps.map((s) => s.g), kind = info.kind;
+    if (!gids.length) return null;
+    const isW = (w) => e.primary === w || e.kana[0] === w;
+    let model;
+    if (kind === 'v1') model = isW('食べる') ? 'みる' : 'たべる';
+    else if (kind === 'v5') model = /[むぶぬ]$/.test(info.base) ? 'かく' : 'よむ';
+    else if (kind === 'vs') model = isW('勉強') ? 'そうじする' : 'べんきょうする';
+    else if (kind === 'vk') model = 'する';
+    else if (kind === 'adj') model = isW('高い') || isW('たかい') ? 'ひろい' : 'たかい';
+    else model = isW('静か') || isW('しずか') ? 'げんき' : 'しずか';
+    const mk = kind === 'vk' ? 'vs' : kind === 'nn' ? 'na' : kind;
+    const mForm = forwardForm(model, mk, gids);
+    if (!mForm) return null;
+    const right = query, wrong = [];
+    const tryAdd = (f) => { if (f && f !== right && wrong.indexOf(f) < 0) wrong.push(f); };
+    const SIB = { pass: ['caus', 'pot'], caus: ['pass', 'pot'], pot: ['pass', 'caus'], passpot: ['caus'], causpass: ['caus', 'pass'], ta: ['te', 'nai'], te: ['ta'],
+      nai: ['ta'], masu: ['mashita', 'masen'], mashita: ['masu', 'masen-deshita'], masen: ['masu', 'masen-deshita'], 'masen-deshita': ['mashita', 'masen'], vol: ['ba', 'imp'],
+      ba: ['vol', 'tara'], imp: ['vol', 'ba'], tara: ['ba', 'ta'], tai: ['nai', 'ta'], 'te-iru': ['te-aru', 'te-oku'], 'te-oku': ['te-iru', 'te-shimau'],
+      'te-shimau': ['te-oku', 'te-iru'], 'adj-ta': ['adj-nai', 'adj-te'], 'adj-nai': ['adj-ta'], 'adj-te': ['adj-adv', 'adj-ta'], 'na-ta': ['na-nai'], 'na-nai': ['na-ta'],
+      'na-da': ['na-ta', 'na-nai', 'na-na'], 'na-desu': ['na-deshita', 'na-nai', 'na-na'], 'na-dearu': ['na-ta', 'na-nai', 'na-ni'], darou: ['deshou', 'na-ta'] };
+    gids.forEach((g, i) => (SIB[g] || []).forEach((s) => tryAdd(forwardForm(info.base, kind, gids.slice(0, i).concat([s], gids.slice(i + 1))))));
+    if (gids.length > 1) gids.forEach((g, i) => tryAdd(forwardForm(info.base, kind, gids.slice(0, i).concat(gids.slice(i + 1)))));
+    // other grammar of the same family (行かなければならない: 行ってもいい, 行ってはいけない), and the wrong う-verb row (行がなければ)
+    gids.forEach((g, i) => { const gr = FORM_GROUPS.find((x) => x.indexOf(g) >= 0) || []; shuffle(gr).forEach((s) => { if (s !== g) tryAdd(forwardForm(info.base, kind, gids.slice(0, i).concat([s], gids.slice(i + 1)))); }); });
+    if (kind === 'v5') for (const end of shuffle(['う', 'る', 'す', 'ぐ'])) {          // never another real verb (行く -> 行う)
+      const nb = info.base.slice(0, -1) + end;
+      if (!info.base.endsWith(end) && !lookupExact(nb).length) tryAdd(forwardForm(nb, 'v5', gids));
+    }
+    // the wrong verb group: 読む treated as a る-verb (読みさせられた), 食べる as an う-verb (食べらせられた)
+    if (kind === 'v5') { const st = info.base.slice(0, -1) + ({ う: 'い', く: 'き', ぐ: 'ぎ', す: 'し', つ: 'ち', ぬ: 'に', ぶ: 'び', む: 'み', る: '' })[info.base.slice(-1)]; tryAdd(forwardForm(st + 'る', 'v1', gids)); }
+    if (kind === 'v1') tryAdd(forwardForm(info.base, 'v5', gids));
+    if (kind === 'v1' && gids[0] === 'passpot') tryAdd(forwardForm(info.base.slice(0, -1) + 'れる', 'v1', gids.slice(1)));   // 見れる: ら抜き, not the textbook form
+    const basic = kind === 'adj' ? ['adj-ta', 'adj-nai', 'adj-te', 'adj-adv', 'adj-ba'] : /^(na|nn)$/.test(kind) ? ['na-ta', 'na-nai', 'na-na', 'na-ni', 'na-de', 'na-desu']
+      : ['ta', 'te', 'nai', 'masu', 'mashita', 'masen', 'vol', 'ba'];
+    if (wrong.length < 3) for (const g of shuffle(basic)) {   // other basic forms of the same word
+      if (gids.indexOf(g) < 0) tryAdd(forwardForm(info.base, kind, gids.slice(0, -1).concat([g])));
+      if (wrong.length >= 3) break;
+    }
+    const pick = wrong.slice(0, 2).concat(shuffle(wrong.slice(2))).slice(0, 3);          // the closest mistakes first
+    if (pick.length < 3) return null;
+    const opts = shuffle([right].concat(pick));
+    return { kicker: '活用（この形を作る）', instr: 'れいの ように、同じ 形に して ください。', stem: '（れい）' + model + ' → ' + mForm + '\n' + info.base + ' → （　　　）',
+      opts: opts, ans: opts.indexOf(right), pre: true };
+  }
+  function renderFormStar() {
+    const row = study.formRow, e = study.entry;
+    if (!row || !e) return;
+    const x = row[2], b = parseBraces(x[0]);
+    const spec = makeStarFrom(e, { plain: b.plain, cuts: x[5], anchor: x[3], id: x[2], src: x[6], by: x[7] || '',
+      after: (box) => { const ja = el('p', { lang: 'ja' }); drawRuby(ja, b.segs, [[x[3], x[4], 'mark']]); box.appendChild(ja); if (x[1]) box.appendChild(el('p', { class: 'q-en' }, x[1])); } });
+    if (!spec) return;
+    const box = $('#drill-practice');
+    spec.kicker = '練習 ' + (box.querySelectorAll('.q').length + 1) + '　文の組み立て（' + row[0] + '）';
+    box.appendChild(questionCard(spec));
+    $('#sec-drill').hidden = false;
   }
 
   /* ---------- wiring ---------- */
@@ -1951,7 +2330,7 @@
     $('#furi-btn').addEventListener('click', () => { furi.on = !furi.on; store.set('furigana', furi.on); ensureFurigana(); redrawCaptions(); });
     renderFuriButton(false);
     $('#examples-more').addEventListener('click', () => { study.showAll = !study.showAll; renderExamples(); });
-    $('#practice-new').addEventListener('click', () => { renderDrills(); renderPractice(); renderGrammarPractice(); });
+    $('#practice-new').addEventListener('click', () => { renderDrills(); renderFormStar(); renderPractice(); renderGrammarPractice(); });
 
     $('#theme-toggle').addEventListener('click', () => {
       const root = document.documentElement;
