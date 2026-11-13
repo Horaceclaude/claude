@@ -19,7 +19,10 @@ Words on no list get an estimate from a model trained on the listed words: how c
 Usage: python3 tools/build_levels.py JAMDICT_DB WALLER_DIR JAMSINCLAIR_DIR EGGROLLS_JSON EXAM_DIR KANJI_JSON OFFICIAL_JSON MINNA_JSON GENKI_CSV OUT.json
 Output: {"<JMdict id>": [level 5..1 or 0, basis, textbook lessons such as "M12 G5"], ...} and a report on stderr.
   basis: "agree" (lists agree), "list" (one list), "mixed" (lists differ; the list level nearer the estimate is kept),
-         "exam" (raised to the easiest level whose real exams use it), "est" (estimated), "beyond" (rarer than N1)
+         "exam" (raised to the easiest level whose real exams use it), "est" (estimated), "beyond" (rarer than N1),
+         "casual" (slang or colloquial, on no list: not tested in the JLPT)
+Words: every word on a list, JMdict's common words, every word with a wordfreq Zipf frequency of 3.0 or more, and slang
+or colloquial words of 2.5 or more (names and titles left out).
 """
 import sys, os, re, csv, json, sqlite3, collections, glob, math, random
 
@@ -212,7 +215,16 @@ common_ids = [i for i in forms_r if pri.get(i, set()) & COMMON]
 known_ids = set(i for i, v in forms_r.items() if v)
 missing = [i for i in level if i not in known_ids]
 if missing: print('list entries not in this JMdict copy (skipped):', len(missing), file=sys.stderr)
-want = sorted((set(common_ids) | set(level)) & known_ids)
+# beyond the lists: every word common in real Japanese (wordfreq), and the slang and colloquial words people use every day
+NAMES = set(r[0] for r in c.execute("select s.idseq from Sense s join misc m on m.sid = s.ID where m.text in ('place name', 'full name of a particular person', 'work of art, literature, music, etc. name')"))
+CASUAL_TAGS = ('slang', 'colloquialism', 'Internet slang', 'manga slang', 'jocular, humorous term', 'vulgar expression or word', 'familiar language')
+casual = set(r[0] for r in c.execute("select s.idseq from Sense s join misc m on m.sid = s.ID where m.text in (%s)" % ','.join('?' * len(CASUAL_TAGS)), CASUAL_TAGS))
+def wordlike(i):
+    main = (forms_k.get(i) or forms_r.get(i) or [''])[0]
+    return len(main) >= 2 and not re.fullmatch(r'[0-9０-９a-zA-Zａ-ｚＡ-Ｚ!-/:-@]+', main)
+everyday = [i for i in known_ids if i not in NAMES and wordlike(i) and (zipf(i) >= 3.0 or (i in casual and zipf(i) >= 2.5))]
+want = sorted((set(common_ids) | set(level) | set(everyday)) & known_ids)
+print('words: lists and common', len((set(common_ids) | set(level)) & known_ids), '| everyday additions', len(set(want) - set(common_ids) - set(level)), file=sys.stderr)
 from sklearn.ensemble import HistGradientBoostingRegressor
 train = [i for i in want if i in level and basis[i] in ('agree', 'list') and level[i] != 4.5]
 X = [features(i) for i in train]; y = [level[i] for i in train]
@@ -243,6 +255,13 @@ for i, p in zip(todo, P):
     else:
         level[i], basis[i] = max(1, min(5, int(round(p)))), 'est'
 
+first_sense = {}
+for sid, idseq in c.execute('select ID, idseq from Sense order by ID'): first_sense.setdefault(idseq, sid)
+casual_main = set(r[0] for r in c.execute("select s.idseq from Sense s join misc m on m.sid = s.ID where m.text in (%s)" % ','.join('?' * len(CASUAL_TAGS)), CASUAL_TAGS)
+                  if False) or set(i for i, in c.execute("select s.idseq from Sense s join misc m on m.sid = s.ID where m.text in (%s) and s.ID in (select min(ID) from Sense group by idseq)" % ','.join('?' * len(CASUAL_TAGS)), CASUAL_TAGS))
+for i in want:                                   # words whose main meaning is slang or colloquial, on no list or exam: not tested in the JLPT
+    if i in casual_main and basis.get(i) in ('est', 'beyond'):
+        level[i], basis[i] = max(1, level[i] or 1), 'casual'
 for src in (exam, workbook):                     # real exams and the workbook use the word at this level
     for i, lv in src.items():
         if i in level and level[i] and level[i] < lv: level[i], basis[i] = lv, 'exam'
@@ -252,6 +271,6 @@ json.dump(out, open(out_path, 'w', encoding='utf-8'), separators=(',', ':'))
 cnt = collections.Counter((v[1], v[0]) for v in out.values())
 for k in sorted(report): print('  %-26s %d' % (k, report[k]), file=sys.stderr)
 print('levels by basis:', file=sys.stderr)
-for bs in ('agree', 'list', 'mixed', 'exam', 'est', 'beyond'):
+for bs in ('agree', 'list', 'mixed', 'exam', 'est', 'beyond', 'casual'):
     print('  %-7s' % bs, {('N%d' % lv if lv else '-'): cnt[(bs, lv)] for lv in (5, 4, 3, 2, 1, 0) if cnt[(bs, lv)]}, file=sys.stderr)
 print('words:', len(out), file=sys.stderr)

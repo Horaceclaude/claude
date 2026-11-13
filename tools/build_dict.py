@@ -25,7 +25,13 @@ COMMON = {'news1', 'ichi1', 'spec1', 'spec2', 'gai1'}
 
 # ---- JLPT levels and how each was decided
 LEVELS = {int(k): v for k, v in json.load(open(levels_path, encoding='utf-8')).items()}
-BASIS = {'agree': 'a', 'list': 'l', 'mixed': 'm', 'exam': 'x', 'est': 'e', 'beyond': 'b'}
+BASIS = {'agree': 'a', 'list': 'l', 'mixed': 'm', 'exam': 'x', 'est': 'e', 'beyond': 'b', 'casual': 'c'}
+# register of the main meaning, shown beside the part of speech (JMdict misc tags)
+REGISTER = {'slang': 'slang', 'colloquialism': 'colloquial', 'Internet slang': 'internet slang', 'manga slang': 'slang', 'vulgar expression or word': 'vulgar',
+            'jocular, humorous term': 'jocular', 'familiar language': 'familiar', 'male term or language': 'male speech', 'female term or language': 'female speech',
+            "children's language": "children's word", 'honorific or respectful (sonkeigo) language': 'honorific (尊敬語)',
+            'humble (kenjougo) language': 'humble (謙譲語)', 'polite (teineigo) language': 'polite (丁寧語)', 'archaism': 'archaic', 'literary or formal term': 'formal',
+            'dated term': 'dated', 'abbreviation': 'abbreviation', 'onomatopoeic or mimetic word': 'onomatopoeia', 'derogatory': 'derogatory'}
 
 kanji = collections.defaultdict(list)
 for kid, idseq, text in c.execute('select ID, idseq, text from Kanji order by ID'): kanji[idseq].append((kid, text))
@@ -139,8 +145,9 @@ for (idseq,) in c.execute('select idseq from Entry order by idseq').fetchall():
     if len(text) > 90: text = gl[0][:90]
     if not text: continue
     plist = pos.get(sids[0], [])
+    register = ', '.join(sorted(set(REGISTER[t] for t in misc.get(sids[0], ()) if t in REGISTER)))
     entries.append(['|'.join(kforms), '|'.join(rforms), text, short_pos(plist), (1 if uk else 0),
-                    rank(pris) if pris & COMMON else 55, idseq, level, infl_class(plist), BASIS[lbasis], '', '', '', textbook])
+                    rank(pris) if pris & COMMON else 55, idseq, level, infl_class(plist), BASIS[lbasis], '', '', '', textbook, register])
     full_gloss[idseq] = [g for sid in sids[:3] for g in gloss.get(sid, [])]
     first_gloss[idseq] = gloss.get(sids[0], [])
 
@@ -307,7 +314,7 @@ print('reading splits', sum(1 for e in entries if e[10]), '| look-alike kanji', 
 
 meta = dict(c.execute('select key, value from meta').fetchall())
 json.dump({'source': 'JMdict %s and KANJIDIC2 (EDRDG); JLPT levels: see tools/build_levels.py; synonyms: Japanese WordNet (NICT); look-alike kanji: Yencken, KanjiVG' % meta.get('jmdict.version', ''),
-           'fields': ['kanji', 'kana', 'gloss', 'pos', 'usuallyKana', 'rank', 'id', 'jlpt', 'class', 'basis', 'split', 'synonyms', 'formation', 'textbook'],
+           'fields': ['kanji', 'kana', 'gloss', 'pos', 'usuallyKana', 'rank', 'id', 'jlpt', 'class', 'basis', 'split', 'synonyms', 'formation', 'textbook', 'register'],
            'entries': entries, 'kanjiAlt': alt, 'kanjiLook': kanji_look, 'kanjiRead': kanji_read, 'compounds': compounds},
           open(out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
 lv = collections.Counter(e[7] for e in entries)

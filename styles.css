@@ -377,3 +377,17 @@ kbd { font: 700 0.75rem var(--font-ui); border: 1px solid var(--line); border-bo
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* question header with its JLPT level, and the explanation shown after answering */
+.q-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.q-head .q-kicker { margin: 0; }
+.q-level { flex: none; }
+.jlpt-mini[data-level="0"] { background: var(--surface-2); color: var(--ink-2); }
+.q-explain { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.q-why-h { font-weight: 700; font-size: 0.8125rem; color: var(--accent); margin: 0 0 4px; }
+.q-why { font-size: 0.9375rem; line-height: 1.6; margin: 4px 0; overflow-wrap: anywhere; }
+.q-why-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 0.9375rem; }
+.q-why-list li { overflow-wrap: anywhere; }
+.q-why-list li.right b { color: var(--ok, #1a7f4b); }
+.q-why-list .n { display: inline-block; min-width: 1.4em; color: var(--ink-2); }
+.q-tick { color: var(--ok, #1a7f4b); font-weight: 700; }
