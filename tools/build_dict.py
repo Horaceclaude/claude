@@ -11,7 +11,8 @@ Usage: python3 tools/build_dict.py jamdict.db levels.json wn-data-jpn.tab look-a
 Each entry: [kanji forms, kana forms, gloss, part of speech, usually-kana flag, frequency rank,
              JMdict entry number, JLPT level (5..1, 0 = beyond N1), inflection class, level basis,
              reading split per character ("かん|きゃく", empty when it cannot be split),
-             near-synonyms ("|"-separated), word formation ("S観" = base + suffix 観, "P未" = prefix 未 + base)]
+             near-synonyms ("|"-separated), word formation ("S観" = base + suffix 観, "P未" = prefix 未 + base),
+             textbook lessons ("M12 G5": みんなの日本語 lesson 12, GENKI I lesson 5)]
 Top level: kanjiAlt (kanji sharing a reading), kanjiLook (kanji that look alike), kanjiRead (on-readings of each kanji),
            compounds (base word -> words formed from it with a prefix or suffix).
 """
@@ -112,7 +113,8 @@ for (idseq,) in c.execute('select idseq from Entry order by idseq').fetchall():
     for kid, _ in kj: pris |= kjp.get(kid, set())
     for kid, _, _ in kn: pris |= knp.get(kid, set())
     if idseq not in LEVELS: continue
-    level, lbasis = LEVELS[idseq]
+    level, lbasis = LEVELS[idseq][0], LEVELS[idseq][1]
+    textbook = LEVELS[idseq][2] if len(LEVELS[idseq]) > 2 else ''
     sids = senses.get(idseq, [])
     if not sids: continue
 
@@ -138,7 +140,7 @@ for (idseq,) in c.execute('select idseq from Entry order by idseq').fetchall():
     if not text: continue
     plist = pos.get(sids[0], [])
     entries.append(['|'.join(kforms), '|'.join(rforms), text, short_pos(plist), (1 if uk else 0),
-                    rank(pris) if pris & COMMON else 55, idseq, level, infl_class(plist), BASIS[lbasis], '', '', ''])
+                    rank(pris) if pris & COMMON else 55, idseq, level, infl_class(plist), BASIS[lbasis], '', '', '', textbook])
     full_gloss[idseq] = [g for sid in sids[:3] for g in gloss.get(sid, [])]
     first_gloss[idseq] = gloss.get(sids[0], [])
 
@@ -305,7 +307,7 @@ print('reading splits', sum(1 for e in entries if e[10]), '| look-alike kanji', 
 
 meta = dict(c.execute('select key, value from meta').fetchall())
 json.dump({'source': 'JMdict %s and KANJIDIC2 (EDRDG); JLPT levels: see tools/build_levels.py; synonyms: Japanese WordNet (NICT); look-alike kanji: Yencken, KanjiVG' % meta.get('jmdict.version', ''),
-           'fields': ['kanji', 'kana', 'gloss', 'pos', 'usuallyKana', 'rank', 'id', 'jlpt', 'class', 'basis', 'split', 'synonyms', 'formation'],
+           'fields': ['kanji', 'kana', 'gloss', 'pos', 'usuallyKana', 'rank', 'id', 'jlpt', 'class', 'basis', 'split', 'synonyms', 'formation', 'textbook'],
            'entries': entries, 'kanjiAlt': alt, 'kanjiLook': kanji_look, 'kanjiRead': kanji_read, 'compounds': compounds},
           open(out, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
 lv = collections.Counter(e[7] for e in entries)

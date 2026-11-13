@@ -9,18 +9,21 @@ The JLPT has published no word list since 2010, so this combines independent evi
   exams    which words appeared in at least 3 real N4, N3 and N2 exams since 2010 (word counts only, from the
            IreneZihuiLi/jlpt-n2-stats, -n3-stats and -n4-stats summaries)
   workbook words the official 2018 practice workbook tests at a given level (data/jlpt-official.json)
+  textbooks which lesson of みんなの日本語 初級 I/II (lessons 1-50, via ganseed/minna-no-nihongo-vocabulary) and
+           GENKI I/II (lessons 0-23, via jackiewkr/genki1-vocab) teaches the word: みんなの日本語 1-25 and GENKI I (0-12)
+           count as N5, みんなの日本語 26-50 and GENKI II (13-23) as N4. Only the word-to-lesson reference is used.
 
 Words on no list get an estimate from a model trained on the listed words: how common the word is
 (wordfreq, CC BY-SA 4.0), the JLPT level of its kanji, its length and its part of speech.
 
-Usage: python3 tools/build_levels.py JAMDICT_DB WALLER_DIR JAMSINCLAIR_DIR EGGROLLS_JSON EXAM_DIR KANJI_JSON OFFICIAL_JSON OUT.json
-Output: {"<JMdict id>": [level 5..1 or 0, basis], ...} and a report on stderr.
+Usage: python3 tools/build_levels.py JAMDICT_DB WALLER_DIR JAMSINCLAIR_DIR EGGROLLS_JSON EXAM_DIR KANJI_JSON OFFICIAL_JSON MINNA_JSON GENKI_CSV OUT.json
+Output: {"<JMdict id>": [level 5..1 or 0, basis, textbook lessons such as "M12 G5"], ...} and a report on stderr.
   basis: "agree" (lists agree), "list" (one list), "mixed" (lists differ; the list level nearer the estimate is kept),
          "exam" (raised to the easiest level whose real exams use it), "est" (estimated), "beyond" (rarer than N1)
 """
 import sys, os, re, csv, json, sqlite3, collections, glob, math, random
 
-db_path, waller_dir, jam_dir, egg_path, exam_dir, kanji_path, official_path, out_path = sys.argv[1:9]
+db_path, waller_dir, jam_dir, egg_path, exam_dir, kanji_path, official_path, minna_path, genki_path, out_path = sys.argv[1:11]
 db = sqlite3.connect('file:%s?mode=ro' % db_path, uri=True)
 c = db.cursor()
 
@@ -31,7 +34,14 @@ def clean(w):
 
 by_kanji, by_kana = collections.defaultdict(set), collections.defaultdict(set)
 for idseq, text in c.execute('select idseq, text from Kanji'): by_kanji[text].add(idseq)
-for idseq, text in c.execute('select idseq, text from Kana'): by_kana[hira(text)].add(idseq)
+first_kana = {}
+usually_kana = {r[0] for r in c.execute("select s.idseq from Sense s join misc m on m.sid = s.ID where m.text like 'word usually written using kana%'")}
+no_kanji = {r[0] for r in c.execute('select idseq from Entry where idseq not in (select idseq from Kanji)')}
+n_senses = collections.Counter(r[0] for r in c.execute('select idseq from Sense'))
+ichidan = {r[0] for r in c.execute("select s.idseq from Sense s join pos p on p.sid = s.ID where p.text like 'Ichidan verb%'")}
+godan = {r[0] for r in c.execute("select s.idseq from Sense s join pos p on p.sid = s.ID where p.text like 'Godan verb%'")}
+for idseq, text in c.execute('select idseq, text from Kana order by ID'):
+    by_kana[hira(text)].add(idseq); first_kana.setdefault(idseq, hira(text))
 pri = collections.defaultdict(set)
 for idseq, t in c.execute('select k.idseq, p.text from Kanji k join KJP p on p.kid = k.ID'): pri[idseq].add(t)
 for idseq, t in c.execute('select k.idseq, p.text from Kana k join KNP p on p.kid = k.ID'): pri[idseq].add(t)
@@ -44,8 +54,8 @@ def nf(idseq):
         if m: r = min(r, int(m.group(1)))
     return r if r < 60 else (30 if 'ichi1' in pri.get(idseq, ()) else 49 if pri.get(idseq, set()) & COMMON else 60)
 
-def match(word, reading=''):
-    """JMdict entry for a word as written in a list, or None."""
+def match(word, reading='', group=None):
+    """JMdict entry for a word as written in a list, or None. group: 'v1' or 'v5' when the list shows how the verb conjugates."""
     w, r = clean(word), hira(clean(reading)) if reading and re.search(r'[぀-ヿ]', reading) else ''
     if not w: return None
     if re.search(r'[一-鿿々]', w):
@@ -53,6 +63,11 @@ def match(word, reading=''):
         if r: ids = {i for i in ids if i in by_kana.get(r, ())} or ids
     else:
         ids = by_kana.get(hira(w), set())
+        if group: ids = {i for i in ids if i in (ichidan if group == 'v1' else godan)} or ids
+        # a word in kana is the entry whose main reading it is (ない is 無い, not 地震, whose old reading is ない), one normally
+        # written in kana, and the most central one, by its number of senses (なる is 成る with many senses, not 生る with one).
+        # JMdict's frequency marks belong to the kana spelling, shared by all homophones, so they come last.
+        if ids: return min(ids, key=lambda i: (first_kana.get(i) != hira(w), i not in usually_kana and i not in no_kanji, -min(n_senses[i], 8), nf(i), i))
     if not ids: return None
     return min(ids, key=lambda i: (nf(i), i))
 
@@ -112,11 +127,46 @@ for word, hits in off['index'].items():
         i = match(word); tally('workbook', i)
         if i: workbook[i] = max(workbook.get(i, 0), lv)
 
+# ---- textbooks: みんなの日本語 (1-50) and GENKI I/II (0-23)
+textbook, lessons = {}, collections.defaultdict(list)
+for row in json.load(open(minna_path, encoding='utf-8')):
+    if row.get('type') != 'word': continue
+    df = row.get('dictionary_form') or ''          # verbs are listed in the ます-form, with the dictionary form beside it
+    kn = row.get('kana') or ''
+    grp = ('v1' if kn[:-2] + 'る' == hira(df) else 'v5') if df and kn.endswith('ます') and not re.search(r'[一-鿿々]', df) else None
+    i = (match(df, group=grp) or (df.endswith('する') and match(df[:-2]))) if df else None
+    i = i or match(row.get('kanji') or row.get('kana'), row.get('kana')) or match(row.get('kana'))
+    tally('minna', i)
+    if not i: continue
+    L = int(row['lesson'])
+    textbook[i] = max(textbook.get(i, 0), 5 if L <= 25 else 4)
+    lessons[i].append('M%d' % L)
+with open(genki_path, encoding='utf-8') as f:
+    for row in csv.reader(f):
+        if len(row) < 4: continue
+        kana, kanji, _, L = row[0], row[1], row[2], row[3]
+        i = match(kanji or kana, kana) or match(kana)
+        tally('genki', i)
+        if not i: continue
+        try: L = int(L)
+        except ValueError: continue
+        textbook[i] = max(textbook.get(i, 0), 5 if L <= 12 else 4)   # GENKI I (0-12) ~ N5, GENKI II (13-23) ~ N4
+        lessons[i].append('G%d' % L)
+
 # ---- combine the lists
 level, basis = {}, {}
-for i in set(waller) | set(jam) | set(egg):
+for i in set(waller) | set(jam) | set(egg) | set(textbook):
     w = jam.get(i, waller.get(i))
     b = egg.get(i)
+    t = textbook.get(i)
+    if t:                                              # a textbook vote: settles disagreements, or stands alone
+        votes = [v for v in (w, b) if v]
+        if not votes: lv, bs = t, 'list'
+        elif any(v == t or (v == 4.5 and t >= 4) for v in votes): lv, bs = t, 'agree'
+        elif len(votes) == 2 and (votes[0] == votes[1] or (4.5 in votes and min(votes) >= 4)): lv, bs = (max(votes) if max(votes) != 4.5 else min(votes)), 'agree'
+        else: lv, bs = (votes[0] if votes[0] != 4.5 else 4, t), 'mixed'
+        level[i], basis[i] = lv, bs
+        continue
     if w and b:
         if b == 4.5 and w >= 4: lv, bs = w, 'agree'
         elif w == b: lv, bs = w, 'agree'
@@ -197,7 +247,7 @@ for src in (exam, workbook):                     # real exams and the workbook u
     for i, lv in src.items():
         if i in level and level[i] and level[i] < lv: level[i], basis[i] = lv, 'exam'
         elif i in level and not level[i]: level[i], basis[i] = lv, 'exam'
-out = {str(i): [int(level[i]), basis[i]] for i in want}
+out = {str(i): [int(level[i]), basis[i], ' '.join(sorted(set(lessons.get(i, [])), key=lambda x: (x[0], int(x[1:]))))] for i in want}
 json.dump(out, open(out_path, 'w', encoding='utf-8'), separators=(',', ':'))
 cnt = collections.Counter((v[1], v[0]) for v in out.values())
 for k in sorted(report): print('  %-26s %d' % (k, report[k]), file=sys.stderr)
