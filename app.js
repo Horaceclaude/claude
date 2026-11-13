@@ -99,6 +99,7 @@
           for (const k of kn) { add(byText, k, i); add(byReading, toHira(k), i); }
         }
         dict.entries = E; dict.byText = byText; dict.byReading = byReading; dict.alt = d.kanjiAlt || null;
+        dict.look = d.kanjiLook || null; dict.read = d.kanjiRead || null; dict.compounds = d.compounds || null;
         return true;
       })
       .catch(() => false);
@@ -107,7 +108,8 @@
   function entryAt(i) {
     const e = dict.entries[i];
     const kanji = e[0] ? e[0].split('|') : [], kana = e[1].split('|'), uk = !!e[4];
-    return { kanji, kana, gloss: e[2], pos: e[3], uk, rank: e[5], id: e[6], jlpt: e[7] || 0, cls: e[8] || '', primary: (uk || !kanji.length) ? kana[0] : kanji[0] };
+    return { kanji, kana, gloss: e[2], pos: e[3], uk, rank: e[5], id: e[6], jlpt: e[7] || 0, cls: e[8] || '', basis: e[9] || '', split: e[10] || '',
+      syn: e[11] ? e[11].split('|') : [], formation: e[12] || '', primary: (uk || !kanji.length) ? kana[0] : kanji[0] };
   }
   // Words spelled exactly like q (in kanji or in kana).
   function lookupExact(q) {
@@ -550,29 +552,53 @@
   const RE_KANJI = /[一-鿿々]/;
   const RE_HIRA = /^[぀-ゟ]*$/;
   const RE_KANA = /^[぀-ヿー]*$/;
-  const LEVEL_NOTE = { 5: 'the easiest level', 4: 'elementary level', 3: 'intermediate level', 2: 'upper-intermediate level', 1: 'the hardest level' };
-  const TASK = {
-    reading: 'Choose the correct reading of the underlined word.',
-    orthography: 'Choose the correct way to write the underlined word.',
-    context: 'Choose the word that best fills the blank.',
-    paraphrase: 'Choose the option closest in meaning to the underlined part.',
-    usage: 'Choose the sentence that uses this word correctly.'
+  const LEVEL_NOTE = { 5: 'beginner', 4: 'elementary', 3: 'intermediate', 2: 'upper intermediate', 1: 'advanced' };
+  const BASIS_NOTE = {
+    a: 'two independent JLPT word lists agree', l: 'on a JLPT word list', m: 'the JLPT word lists differ; the better-supported level is shown',
+    x: 'used in real JLPT exams at this level', e: 'estimated: not on the JLPT word lists, judged by how common the word is and its kanji'
   };
-  const INSTR = {
-    reading: '＿＿のことばの読み方として最もよいものを、１・２・３・４から一つえらびなさい。',
-    orthography: '＿＿のことばを漢字で書くとき、最もよいものを、１・２・３・４から一つえらびなさい。',
-    context: '（　　　）に入れるのに最もよいものを、１・２・３・４から一つえらびなさい。'
+  const TYPE_JA = { reading: '漢字読み', orthography: '表記', formation: '語形成', context: '文脈規定', paraphrase: '言い換え類義', usage: '用法' };
+  // The instructions as each level's test booklet words them.
+  const KANA_INSTR = {
+    reading: '＿＿＿の ことばは ひらがなで どう かきますか。１・２・３・４から いちばん いい ものを ひとつ えらんで ください。',
+    orthography: '＿＿＿の ことばは どう かきますか。１・２・３・４から いちばん いい ものを ひとつ えらんで ください。',
+    context: '（　　　）に なにを いれますか。１・２・３・４から いちばん いい ものを ひとつ えらんで ください。',
+    paraphrase: '＿＿＿の ぶんと だいたい おなじ いみの ぶんが あります。１・２・３・４から いちばん いい ものを ひとつ えらんで ください。',
+    usage: 'つぎの ことばの つかいかたで いちばん いい ものを １・２・３・４から ひとつ えらんで ください。'
   };
-  const study = { entry: null, query: '', examples: [], showAll: false, seq: 0, shards: new Map(), official: null, pools: null };
+  const INSTR_JA = {
+    5: Object.assign({}, KANA_INSTR, { context: '（　　　）に なにが はいりますか。１・２・３・４から いちばん いい ものを ひとつ えらんで ください。' }),
+    4: KANA_INSTR,
+    3: {
+      reading: '＿＿＿のことばの読み方として最もよいものを、１・２・３・４から一つえらびなさい。',
+      orthography: '＿＿＿のことばを漢字で書くとき、最もよいものを、１・２・３・４から一つえらびなさい。',
+      context: '（　　　）に入れるのに最もよいものを、１・２・３・４から一つえらびなさい。',
+      paraphrase: '＿＿＿に意味が最も近いものを、１・２・３・４から一つえらびなさい。',
+      usage: 'つぎのことばの使い方として最もよいものを、１・２・３・４から一つえらびなさい。'
+    },
+    2: {
+      reading: '＿＿＿の言葉の読み方として最もよいものを、１・２・３・４から一つ選びなさい。',
+      orthography: '＿＿＿の言葉を漢字で書くとき、最もよいものを、１・２・３・４から一つ選びなさい。',
+      formation: '（　　　）に入れるのに最もよいものを、１・２・３・４から一つ選びなさい。',
+      context: '（　　　）に入れるのに最もよいものを、１・２・３・４から一つ選びなさい。',
+      paraphrase: '＿＿＿の言葉に意味が最も近いものを、１・２・３・４から一つ選びなさい。',
+      usage: '次の言葉の使い方として最もよいものを、１・２・３・４から一つ選びなさい。'
+    }
+  };
+  INSTR_JA[1] = INSTR_JA[2];
+  const instrFor = (type, level) => { const set = INSTR_JA[level >= 1 && level <= 5 ? level : 1]; return set[type] || set.context; };
+  const study = { entry: null, query: '', examples: [], showAll: false, seq: 0, shards: new Map(), official: null, pools: null, shardData: null };
 
-  function loadExamples(id) {
+  function loadShard(id) {
     const key = String(id % 64).padStart(2, '0');
     if (!study.shards.has(key)) {
       study.shards.set(key, fetch('data/ex/' + key + '.json').then((r) => (r.ok ? r.json() : {})).catch(() => ({})));
     }
-    // The sentence arrives with readings in braces, 学{がっ}校{こう}; keep that for display and a plain copy for everything else.
-    return study.shards.get(key).then((sh) => (sh[id] || []).map((x) => ({ ja: x[0].replace(/\{[^}]*\}/g, ''), furi: x[0], en: x[1], id: x[2], by: x[3], form: x[4] })));
+    return study.shards.get(key);
   }
+  // The sentence arrives with readings in braces, 学{がっ}校{こう}; keep that for display and a plain copy for everything else.
+  const rowToEx = (x) => ({ ja: x[0].replace(/\{[^}]*\}/g, ''), furi: x[0], en: x[1], id: x[2], by: x[3], form: x[4] });
+  function loadExamples(id) { return loadShard(id).then((sh) => (sh[id] || []).map(rowToEx)); }
   function loadOfficial() {
     if (!study.official) study.official = fetch('data/jlpt-official.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
     return study.official;
@@ -714,8 +740,10 @@
     if (!e) { row.hidden = true; return; }
     const pill = $('#word-jlpt');
     pill.dataset.level = String(e.jlpt || 0);
-    pill.textContent = e.jlpt ? 'JLPT N' + e.jlpt : 'Not in the JLPT lists';
-    $('#word-jlpt-note').textContent = e.jlpt ? LEVEL_NOTE[e.jlpt] : 'not on the N5 to N1 study lists';
+    pill.dataset.basis = e.basis || '';
+    pill.textContent = !e.jlpt ? 'Beyond N1' : 'JLPT N' + e.jlpt + (e.basis === 'e' ? ' (estimate)' : '');
+    $('#word-jlpt-note').textContent = !e.jlpt ? 'rarer than the vocabulary the JLPT N1 expects'
+      : LEVEL_NOTE[e.jlpt] + (BASIS_NOTE[e.basis] ? ' · ' + BASIS_NOTE[e.basis] : '');
     row.hidden = false;
   }
 
@@ -739,9 +767,9 @@
       return;
     }
     empty.textContent = 'Loading examples…';
-    loadExamples(e.id).then((list) => {
+    Promise.all([loadExamples(e.id), loadShard(e.id)]).then(([list, shard]) => {
       if (my !== study.seq) return;
-      study.examples = list;
+      study.examples = list; study.shardData = shard;
       renderExamples();
       renderPractice();
     });
@@ -774,16 +802,16 @@
   /* One multiple-choice card, used for official and for generated questions. */
   function questionCard(spec) {
     const art = el('article', { class: 'q' });
-    art.appendChild(el('p', { class: 'q-kicker' }, spec.kicker));
-    const instr = el('p', { class: 'q-instr' }, spec.instr);
-    if (spec.instrLang) instr.lang = spec.instrLang;
+    art.appendChild(el('p', { class: 'q-kicker', lang: 'ja' }, spec.kicker));
+    if (spec.sub) art.appendChild(el('p', { class: 'q-sub', lang: 'ja' }, spec.sub));
+    const instr = el('p', { class: 'q-instr', lang: 'ja' }, spec.instr);
     art.appendChild(instr);
     const stem = el('p', { class: 'q-stem', lang: 'ja' });
     renderMarked(stem, spec.stem);
     art.appendChild(stem);
     const long = spec.opts.some((o) => o.replace(new RegExp('[' + U0 + U1 + ']', 'g'), '').length > 9);
     const ol = el('ol', { class: 'q-opts' + (long ? ' long' : '') });
-    const result = el('p', { class: 'q-result', role: 'status' });
+    const result = el('p', { class: 'q-result', role: 'status', lang: 'ja' });
     const after = el('div', { class: 'q-after' });
     after.hidden = true;
     spec.opts.forEach((o, i) => {
@@ -797,7 +825,7 @@
         all.forEach((x) => { x.disabled = true; });
         all[spec.ans].classList.add('right');
         if (i !== spec.ans) b.classList.add('wrong');
-        result.textContent = i === spec.ans ? 'Correct' : 'Not quite. The answer is ' + (spec.ans + 1) + '.';
+        result.textContent = i === spec.ans ? '正解です。' : '不正解です。正しい答えは ' + (spec.ans + 1) + ' です。';
         result.className = 'q-result ' + (i === spec.ans ? 'ok' : 'no');
         if (spec.after) after.hidden = false;
       });
@@ -810,6 +838,11 @@
   }
 
   /* Questions from the official practice workbook that involve this word. */
+  function officialType(q, level) {
+    // N2 and N1 word-formation items share their instruction with the blank-filling ones; their choices are one or two characters.
+    if (q.type === 'context' && level <= 2 && q.opts.every((o) => o.length <= 2)) return 'formation';
+    return q.type;
+  }
   function renderOfficial(my) {
     loadOfficial().then((data) => {
       if (my !== study.seq || !data) return;
@@ -823,15 +856,16 @@
       const box = $('#official-list');
       box.textContent = '';
       if (!hits.length) { $('#official-block').hidden = true; return; }
-      const role = ['Your word appears in the sentence', 'Your word is one of the choices', 'This question tests your word'];
+      const role = ['この言葉が問題文の中にある問題', 'この言葉が選択肢にある問題', 'この言葉が問われている問題'];
       for (const h of hits) {
-        const q = data.questions[h[0]], paper = data.papers[q.paper];
+        const q = data.questions[h[0]], paper = data.papers[q.paper], type = officialType(q, paper.level);
         box.appendChild(questionCard({
-          kicker: 'Official JLPT question · N' + paper.level + ' · ' + role[h[1]],
-          instr: TASK[q.type] || '', stem: q.stem, opts: q.opts, ans: q.ans - 1,
+          kicker: '公式問題　N' + paper.level + '　' + TYPE_JA[type], sub: role[h[1]],
+          instr: instrFor(type, paper.level), stem: q.stem, opts: q.opts, ans: q.ans - 1,
           source: (p) => {
-            p.appendChild(document.createTextNode('Source: Official Worldwide Japanese-Language Proficiency Test Website (https://www.jlpt.jp/). '));
-            p.appendChild(el('a', { href: paper.url + '#page=' + q.page, target: '_blank', rel: 'noopener' }, paper.title + ', question ' + q.n + ' ↗'));
+            p.appendChild(document.createTextNode('出典：日本語能力試験公式ウェブサイト（https://www.jlpt.jp/） '));
+            p.appendChild(el('a', { href: paper.url + '#page=' + q.page, target: '_blank', rel: 'noopener' },
+              '『日本語能力試験 公式問題集 第二集』N' + paper.level + ' 言語知識（文字・語彙）' + q.n + '番 ↗'));
           }
         }));
       }
@@ -839,7 +873,7 @@
     });
   }
 
-  /* ----- practice questions made from the example sentences ----- */
+  /* ----- practice questions in JLPT format, made from the example sentences ----- */
   // How the word is written in a sentence, split into the dictionary form's ending and the ending used here.
   function formParts(e, form) {
     const heads = e.kanji.concat(e.kana);
@@ -862,12 +896,24 @@
     }
     return null;
   }
+  // Nouns are asked about on their own: 勉強 rather than 勉強し, 満足 rather than 満足な.
+  function normForm(e, form) {
+    if (!/^(n|vs|adj-na|adv)$/.test(e.cls)) return form;
+    const h = e.kanji.concat(e.kana).find((w) => form !== w && form.startsWith(w));
+    return h || form;
+  }
+  // Another word put into the same form: 食べて -> 起きて, 勉強 -> 練習.
+  function inflectAs(o, parts, asReading) {
+    const base = asReading ? o.kana[0] : o.primary;
+    if (!base.endsWith(parts.tailH) || base.length <= parts.tailH.length) return null;
+    return base.slice(0, base.length - parts.tailH.length) + parts.tailF;
+  }
   const VOICE = (() => {
     const m = {}, add = (a, b) => { (m[a] = m[a] || []).push(b); (m[b] = m[b] || []).push(a); };
     'かが きぎ くぐ けげ こご さざ しじ すず せぜ そぞ ただ ちぢ つづ てで とど はば ひび ふぶ へべ ほぼ はぱ ひぴ ふぷ へぺ ほぽ'.split(' ').forEach((p) => add(p[0], p[1]));
     return m;
   })();
-  // Near-miss readings of the kind the test uses: voiced or not, long or short vowel, small っ or not.
+  // Near-miss readings of the kind the test uses: voiced or not, long or short vowel, small っ or not, ゃゅょ swapped.
   function readingVariants(r) {
     const voiced = new Set(), length = new Set(), sokuon = new Set();
     for (let i = 0; i < r.length; i++) {
@@ -879,7 +925,7 @@
       else if (i > 0 && /[かきくけこさしすせそたちつてとぱぴぷぺぽ]/.test(r[i]) && !/[っんゃゅょ]/.test(r[i - 1]) && r[i - 1] !== r[i]) sokuon.add(r.slice(0, i) + 'っ' + r.slice(i));
     }
     const out = shuffle(Array.from(length)).slice(0, 2).concat(shuffle(Array.from(voiced)).slice(0, 2), shuffle(Array.from(sokuon)).slice(0, 1));
-    return shuffle(out.filter((v) => v !== r));
+    return shuffle(out.filter((v) => v !== r && v));
   }
   function pool(cls) {
     if (!study.pools) {
@@ -888,95 +934,267 @@
     }
     return study.pools.get(cls) || [];
   }
-  // Other words of the same kind and a similar level, put into the same form (食べて -> 起きて, 見て …).
-  function otherWords(e, parts, want, asReading) {
-    const level = e.jlpt || 2, out = [], seen = new Set([asReading ? parts.reading : parts.head.slice(0, parts.head.length - parts.tailH.length) + parts.tailF]);
-    const kanjiWanted = !asReading && RE_KANJI.test(parts.head);
-    for (const pass of [1, 4]) {
-      for (const i of shuffle(pool(e.cls))) {
-        if (out.length >= want) return out;
-        const o = entryAt(i);
-        if (o.id === e.id || Math.abs((o.jlpt || 2) - level) > pass) continue;
-        const base = asReading ? o.kana[0] : o.primary;
-        if (!base.endsWith(parts.tailH) || base.length <= parts.tailH.length) continue;
-        if (asReading && (!RE_KANJI.test(o.primary) || Math.abs(base.length - (parts.reading.length - parts.tailF.length + parts.tailH.length)) > 1)) continue;
-        if (kanjiWanted && !RE_KANJI.test(base)) continue;
-        const f = base.slice(0, base.length - parts.tailH.length) + parts.tailF;
-        if (seen.has(f)) continue;
-        seen.add(f); out.push(f);
-      }
+  function byId(id) {
+    if (!dict.byId) { dict.byId = new Map(); dict.entries.forEach((raw, i) => dict.byId.set(raw[6], i)); }
+    const i = dict.byId.get(id);
+    return i == null ? null : entryAt(i);
+  }
+  // English meaning words, so that choices with the same meaning as the answer are never offered as "wrong".
+  const STOPW = new Set('the and for with from into something someone thing etc not one'.split(' '));
+  const tokCache = new Map();
+  function toks(g) {
+    if (tokCache.has(g)) return tokCache.get(g);
+    const out = new Set();
+    for (let t of (String(g).toLowerCase().replace(/\([^)]*\)/g, ' ').match(/[a-z]{3,}/g) || [])) {
+      if (STOPW.has(t)) continue;
+      for (const suf of ['ingly', 'edly', 'ness', 'ally', 'ing', 'ity', 'ed', 'ly', 'es', 's']) if (t.endsWith(suf) && t.length - suf.length >= 4) { t = t.slice(0, -suf.length); break; }
+      out.add(t);
     }
+    tokCache.set(g, out);
     return out;
   }
-  function finish(kind, stem, right, wrong, x) {
+  function related(a, b) {
+    if (a.syn.indexOf(b.primary) >= 0 || b.syn.indexOf(a.primary) >= 0) return true;
+    const ta = toks(a.gloss);
+    for (const t of toks(b.gloss)) if (ta.has(t)) return true;
+    return false;
+  }
+  const IS_KATA = (w) => /^[゠-ヿー]+$/.test(w);
+  // Wrong choices of the same kind and a similar level, put into the same form. The closer they look to the answer, the better.
+  function pickWords(e, parts, n, opts) {
+    const level = e.jlpt || 1, seen = new Set([opts.right]), cands = [];
+    for (const i of shuffle(pool(e.cls)).slice(0, 600)) {
+      const o = entryAt(i);
+      if (o.id === e.id || !o.jlpt || Math.abs(o.jlpt - level) > 1 || related(e, o)) continue;
+      if (opts.avoid && opts.avoid.some((a) => a.id === o.id || related(a, o))) continue;
+      const f = inflectAs(o, parts, opts.asReading);
+      if (!f || seen.has(f)) continue;
+      if (opts.asReading && (!RE_KANJI.test(o.primary) || Math.abs(f.length - opts.right.length) > 1)) continue;
+      if (!opts.asReading && RE_KANJI.test(opts.right) !== RE_KANJI.test(f)) continue;
+      let s = Math.random();
+      if (o.jlpt <= level) s += 1;                                                     // as hard as the answer, or harder
+      if (IS_KATA(o.primary) === IS_KATA(e.primary)) s += 1.5; else s -= 3;            // katakana with katakana
+      for (const ch of e.primary) if (RE_KANJI.test(ch) && o.primary.indexOf(ch) >= 0) { s += 2; break; }   // shares a kanji
+      if (o.primary.length === e.primary.length) s += 0.5;
+      if (opts.asReading && f.length === opts.right.length) s += 1;
+      seen.add(f); cands.push([s, f]);
+    }
+    cands.sort((a, b) => b[0] - a[0]);
+    return cands.slice(0, n).map((c) => c[1]);
+  }
+  function finish(type, stem, right, wrong, x, e) {
+    wrong = Array.from(new Set(wrong.filter((w) => w && w !== right)));
     if (wrong.length < 3) return null;
     const opts = shuffle([right].concat(wrong.slice(0, 3)));
     return {
-      kicker: kind, instr: INSTR[kind === 'Kanji reading' ? 'reading' : kind === 'Writing in kanji' ? 'orthography' : 'context'], instrLang: 'ja',
-      stem: stem, opts: opts, ans: opts.indexOf(right),
+      type: type, instr: instrFor(type, e.jlpt || 1), stem: stem, opts: opts, ans: opts.indexOf(right),
       after: (box) => {
         const ja = el('p', { lang: 'ja' });
         renderFurigana(ja, x.furi || x.ja, x.form);          // now that it is answered, show the readings
         box.appendChild(ja);
-        if (x.en) box.appendChild(el('p', null, x.en));
+        if (x.en) box.appendChild(el('p', { class: 'q-en' }, x.en));
       },
       source: x.id ? (p) => {
-        p.appendChild(document.createTextNode('Sentence: '));
+        p.appendChild(document.createTextNode('例文：'));
         p.appendChild(el('a', { href: 'https://tatoeba.org/sentences/show/' + x.id, target: '_blank', rel: 'noopener' }, 'Tatoeba #' + x.id));
       } : null
     };
   }
+
+  // 漢字読み: readings that differ in one sound, or in the reading of one kanji (けんぎゃく／かんぎゃく／けんきゃく for かんきゃく).
   function makeReading(e, x) {
     const parts = formParts(e, x.form);
     if (!parts || !RE_KANJI.test(x.form) || !RE_HIRA.test(parts.reading)) return null;
-    const headReading = parts.reading.slice(0, parts.reading.length - parts.tailF.length);
+    const right = parts.reading, n = parts.head.length - parts.tailH.length;
+    const segs = e.split && parts.head === e.kanji[0] ? e.split.split('|') : null;
+    const known = new Set(e.kana.map(toHira));
     let wrong = [];
-    if (!parts.tailH) wrong = readingVariants(headReading).map((v) => v + parts.tailF);     // nouns: near-miss readings
-    wrong = wrong.slice(0, 3);
-    if (wrong.length < 3) wrong = wrong.concat(otherWords(e, parts, 3 - wrong.length, true).filter((w) => wrong.indexOf(w) < 0));
-    return finish('Kanji reading', wrapFirst(x.ja, x.form, U0 + x.form + U1), parts.reading, wrong, x);
+    if (segs && segs.length === parts.head.length) {
+      const kidx = [];
+      for (let i = 0; i < n; i++) if (RE_KANJI.test(parts.head[i])) kidx.push(i);
+      // A sound change first (かん -> がん, きゃく -> ぎゃく); another on-reading of the same kanji only when it is close in length.
+      const altFor = (i) => {
+        const s = segs[i], c = parts.head[i];
+        const near = readingVariants(s).filter((v) => v && v !== s);
+        const other = shuffle(((dict.read && dict.read[c]) || []).filter((r) => r !== s && Math.abs(r.length - s.length) <= 1));
+        return (Math.random() < 0.7 ? near.concat(other) : other.concat(near)).filter((v) => v && v !== s);
+      };
+      const build = (rep) => segs.slice(0, n).map((s, i) => (rep[i] != null ? rep[i] : s)).join('') + parts.tailF;
+      if (kidx.length >= 2) {
+        const alts = new Map(kidx.map((i) => [i, altFor(i)]));
+        const ready = kidx.filter((i) => alts.get(i).length);
+        if (ready.length >= 2) {                     // the grid: change one kanji, the other, or both
+          const pick = shuffle(ready).slice(0, 2), A = alts.get(pick[0])[0], B = alts.get(pick[1])[0];
+          wrong = [build({ [pick[0]]: A }), build({ [pick[1]]: B }), build({ [pick[0]]: A, [pick[1]]: B })];
+        } else if (ready.length === 1) {             // only one kanji has a near reading: several changes to that one
+          const i = ready[0];
+          wrong = alts.get(i).slice(0, 3).map((v) => build({ [i]: v }));
+        }
+      }
+    }
+    const uniq = (list) => Array.from(new Set(list.filter((w) => w && w !== right && !known.has(w))));
+    wrong = uniq(wrong);
+    if (wrong.length < 3 && !parts.tailH && RE_KANJI.test(parts.head) && parts.head.length > 1) wrong = uniq(wrong.concat(readingVariants(right)));
+    if (wrong.length < 3) wrong = uniq(wrong.concat(pickWords(e, parts, 3 - wrong.length, { asReading: true, right: right })));
+    return finish('reading', wrapFirst(x.ja, x.form, U0 + x.form + U1), right, wrong.slice(0, 3), x, e);
   }
+
+  // 表記: kanji that sound the same or look alike, in the grid the test uses (満足／万足／満続／万続).
   function makeWriting(e, x) {
     const parts = formParts(e, x.form);
-    if (!parts || !RE_KANJI.test(x.form) || !dict.alt) return null;
-    const chars = Array.from(x.form), spots = chars.map((c, i) => (dict.alt[c] ? i : -1)).filter((i) => i >= 0);
-    if (!spots.length) return null;
+    if (!parts || !RE_KANJI.test(x.form)) return null;
+    const chars = Array.from(x.form), kidx = chars.map((c, i) => (RE_KANJI.test(c) && c !== '々' ? i : -1)).filter((i) => i >= 0);
+    const alts = (c, prefer) => {
+      const look = Array.from((dict.look && dict.look[c]) || ''), same = Array.from((dict.alt && dict.alt[c]) || '');
+      const list = prefer === 'look' ? look.slice(0, 4).concat(same.slice(0, 4)) : same.slice(0, 4).concat(look.slice(0, 4));
+      return shuffle(list.slice(0, 4)).concat(list.slice(4));
+    };
+    const ok = (w) => w !== x.form && !dict.byText.has(w);
     const wrong = new Set();
-    for (let tries = 0; tries < 60 && wrong.size < 3; tries++) {
-      const c = chars.slice();
-      const picks = spots.length > 1 && Math.random() < 0.35 ? spots : [spots[Math.floor(Math.random() * spots.length)]];
-      for (const i of picks) { const a = Array.from(dict.alt[chars[i]]); c[i] = a[Math.floor(Math.random() * Math.min(a.length, 6))]; }
-      const w = c.join('');
-      if (w !== x.form && !dict.byText.has(w)) wrong.add(w);
+    if (kidx.length >= 2 && Math.random() < 0.6) {
+      const pick = shuffle(kidx).slice(0, 2), A = alts(chars[pick[0]], 'same')[0], B = alts(chars[pick[1]], Math.random() < 0.5 ? 'same' : 'look')[0];
+      if (A && B) {
+        const make = (rep) => chars.map((c, i) => (rep[i] || c)).join('');
+        [make({ [pick[0]]: A }), make({ [pick[1]]: B }), make({ [pick[0]]: A, [pick[1]]: B })].filter(ok).forEach((w) => wrong.add(w));
+      }
     }
-    return finish('Writing in kanji', wrapFirst(x.ja, x.form, U0 + parts.reading + U1), x.form, Array.from(wrong), x);
+    for (let tries = 0; tries < 40 && wrong.size < 3; tries++) {
+      const i = kidx[Math.floor(Math.random() * kidx.length)], a = alts(chars[i], Math.random() < 0.6 ? 'look' : 'same');
+      if (!a.length) continue;
+      const c = chars.slice(); c[i] = a[Math.floor(Math.random() * Math.min(a.length, 3))];
+      const w = c.join('');
+      if (ok(w)) wrong.add(w);
+    }
+    return finish('orthography', wrapFirst(x.ja, x.form, U0 + parts.reading + U1), x.form, Array.from(wrong), x, e);
   }
-  function makeBlank(e, x) {
+
+  // 語形成: the prefix or suffix of a formed word (可能（性）, （未）使用).
+  function affixes(kind) {
+    if (!dict.affixes) {
+      dict.affixes = { S: new Set(), P: new Set() };
+      for (const raw of dict.entries) if (raw[12]) dict.affixes[raw[12][0]].add(raw[12].slice(1));
+    }
+    return Array.from(dict.affixes[kind]);
+  }
+  function makeFormation(e, x) {
+    if (!e.formation || x.form.indexOf(e.primary) < 0 || x.ja.indexOf(e.primary) < 0) return null;
+    const kind = e.formation[0], aff = e.formation.slice(1);
+    const base = kind === 'S' ? e.primary.slice(0, e.primary.length - aff.length) : e.primary.slice(aff.length);
+    const words = (a) => (kind === 'S' ? base + a : a + base);
+    const wrong = shuffle(affixes(kind)).filter((a) => a !== aff && a.length === aff.length && !dict.byText.has(words(a))).slice(0, 3);
+    const stem = wrapFirst(x.ja, e.primary, kind === 'S' ? base + '（　　　）' : '（　　　）' + base);
+    const spec = finish('formation', stem, aff, wrong, x, e);
+    if (spec && e.jlpt >= 3) spec.instr = instrFor('context', e.jlpt);
+    return spec;
+  }
+
+  // 文脈規定: the word that fits the blank, among words of the same kind that look like it.
+  function makeContext(e, x) {
     const parts = formParts(e, x.form);
-    if (!parts || (parts.tailF && !parts.tailH)) return null;   // 満足な would need distractors that also take な
-    return finish('Fill in the blank', wrapFirst(x.ja, x.form, '（　　　）'), x.form, otherWords(e, parts, 3, false), x);
+    if (!parts || (parts.tailF && !parts.tailH)) return null;
+    return finish('context', wrapFirst(x.ja, x.form, '（　　　）'), x.form, pickWords(e, parts, 3, { right: x.form }), x, e);
   }
+
+  // 言い換え類義: the word closest in meaning. At N5 and N4 the choices are whole sentences, as in the test.
+  function makeParaphrase(e, x) {
+    if (!e.syn.length) return null;
+    const parts = formParts(e, x.form);
+    if (!parts) return null;
+    // Only a close match: each word's main meaning must appear among the other's meanings (訓練 "training" / 練習 "practice; training").
+    const first = (o) => toks(o.gloss.split(';')[0]);
+    const meets = (a, b) => { const tb = toks(b.gloss); for (const t of first(a)) if (tb.has(t)) return true; return false; };
+    let s = null;
+    for (const w of e.syn) {
+      s = lookupExact(w).find((o) => o.cls === e.cls && o.pos === e.pos && o.id !== e.id && meets(o, e) && meets(e, o)
+        && e.primary.indexOf(o.primary) < 0 && o.primary.indexOf(e.primary) < 0) || null;     // not 時 for 時間
+      if (s) break;
+    }
+    if (!s) return null;
+    const right = inflectAs(s, parts, false);
+    if (!right || right === x.form) return null;
+    const wrong = pickWords(e, parts, 3, { right: right, avoid: [s] });
+    if ((e.jlpt || 1) >= 4) {
+      if (x.ja.length > 30) return null;
+      const spec = finish('paraphrase', U0 + x.ja + U1, wrapFirst(x.ja, x.form, right), wrong.map((w) => wrapFirst(x.ja, x.form, w)), x, e);
+      return spec;
+    }
+    return finish('paraphrase', wrapFirst(x.ja, x.form, U0 + x.form + U1), right, wrong, x, e);
+  }
+
+  // 用法: the one sentence that uses the word correctly; the others are sentences where a different word belongs.
+  function makeUsage(e, x) {
+    const sh = study.shardData;
+    // Not for adverbs and な-adjectives: swapped into another word's sentence they too often still make sense.
+    if (!sh || !/^(n|vs|v1|v5[a-z]|adj-i)$/.test(e.cls) || x.ja.length > 34) return null;
+    const parts = formParts(e, x.form);
+    if (!parts) return null;
+    const level = e.jlpt || 1, wrong = [];
+    for (const id of shuffle(Object.keys(sh))) {
+      if (wrong.length >= 3) break;
+      const o = byId(+id);
+      if (!o || o.id === e.id || o.cls !== e.cls || !o.jlpt || Math.abs(o.jlpt - level) > 2 || related(e, o)) continue;
+      for (const row of shuffle(sh[id])) {
+        const y = rowToEx(row), yform = normForm(o, y.form);
+        if (y.ja.length > 34 || y.ja.indexOf(e.primary) >= 0 || /[A-Za-zＡ-Ｚａ-ｚ]/.test(y.ja)) continue;
+        const p = formParts(o, yform);
+        if (!p || p.tailH !== parts.tailH) continue;
+        const t = inflectAs(e, p, false);
+        if (!t) continue;
+        wrong.push(wrapFirst(y.ja, yform, U0 + t + U1));
+        break;
+      }
+    }
+    return finish('usage', e.primary, wrapFirst(x.ja, x.form, U0 + x.form + U1), wrong, x, e);
+  }
+
+  // 語形成 for a base word (可能 -> 可能性): uses the formed word's own example sentences.
+  function formationFromBase(e) {
+    const list = (dict.compounds && dict.compounds[e.primary]) || [];
+    for (const w of shuffle(list)) {
+      const ce = lookupExact(w).find((o) => o.formation);
+      if (ce) return loadExamples(ce.id).then((ex) => {
+        for (const y of shuffle(ex)) { const spec = makeFormation(ce, Object.assign({}, y, { form: normForm(ce, y.form) })); if (spec) return spec; }
+        return null;
+      });
+    }
+    return Promise.resolve(null);
+  }
+
+  const MAKERS = [['reading', makeReading], ['orthography', makeWriting], ['formation', makeFormation],
+    ['context', makeContext], ['paraphrase', makeParaphrase], ['usage', makeUsage]];
   function renderPractice() {
-    const e = study.entry, box = $('#practice-list');
+    const e = study.entry, box = $('#practice-list'), my = study.seq;
     box.textContent = '';
     if (!e) { $('#practice-block').hidden = true; return; }
-    let sentences = shuffle(study.examples);
+    let sentences = shuffle(study.examples).map((x) => Object.assign({}, x, { form: normForm(e, x.form) }));
     if (!sentences.length && state.targetText && state.targetText.indexOf(study.query) >= 0) {
       sentences = [{ ja: state.targetText, en: '', id: 0, by: '', form: study.query }];   // fall back to the caption on screen
     }
-    if (/^(n|vs|adj-na|adv)$/.test(e.cls)) {                 // ask about 勉強, not 勉強し or 満足な
-      const heads = e.kanji.concat(e.kana);
-      sentences = sentences.map((x) => { const h = heads.find((w) => x.form !== w && x.form.startsWith(w)); return h ? Object.assign({}, x, { form: h }) : x; });
+    const slots = [], usedIds = new Set();
+    for (const [type, make] of MAKERS) {
+      let spec = null;
+      const order = sentences.filter((x) => !usedIds.has(x.id)).concat(sentences.filter((x) => usedIds.has(x.id)));
+      for (const x of order) { spec = make(e, x); if (spec) { usedIds.add(x.id); break; } }
+      if (spec) slots.push(spec);
+      else if (type === 'formation' && !e.formation && dict.compounds && dict.compounds[e.primary]) slots.push(formationFromBase(e));
     }
-    const cards = [];
-    [makeReading, makeBlank, makeWriting].forEach((make, k) => {
-      for (let j = 0; j < sentences.length; j++) {
-        const spec = make(e, sentences[(j + k) % sentences.length]);
-        if (spec) { cards.push(spec); break; }
-      }
-    });
-    cards.forEach((c) => box.appendChild(questionCard(c)));
-    $('#practice-block').hidden = cards.length === 0;
+    let n = 0;
+    const number = () => { box.querySelectorAll('.q-kicker').forEach((k, i) => { k.textContent = '練習問題 ' + (i + 1) + '　' + k.dataset.type; }); };
+    for (const s of slots) {
+      if (s && typeof s.then === 'function') {
+        const holder = el('div');
+        box.appendChild(holder);
+        s.then((spec) => { if (my !== study.seq || !spec) { holder.remove(); return; } holder.replaceWith(practiceCard(spec)); number(); });
+      } else { box.appendChild(practiceCard(s)); n++; }
+    }
+    number();
+    $('#practice-block').hidden = slots.length === 0;
+  }
+  function practiceCard(spec) {
+    spec.kicker = TYPE_JA[spec.type];
+    const card = questionCard(spec);
+    card.querySelector('.q-kicker').dataset.type = TYPE_JA[spec.type];
+    return card;
   }
 
   /* ---------- wiring ---------- */
@@ -1060,6 +1278,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   // Small surface for automated checks.
-  window.__kikitori = { state: state, study: study, furi: furi, loadTokenizer: loadTokenizer, alignReading: alignReading, captionSegs: captionSegs, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, makeBlank: makeBlank, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
+  window.__kikitori = { state: state, study: study, makeFormation: makeFormation, makeContext: makeContext, makeParaphrase: makeParaphrase, makeUsage: makeUsage, MAKERS: MAKERS, byId: byId, normForm: normForm, furi: furi, loadTokenizer: loadTokenizer, alignReading: alignReading, captionSegs: captionSegs, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
     events: { onFetchDone: onFetchDone, onVideoChange: onVideoChange, onCaptionChange: onCaptionChange, onCaptionConsumed: onCaptionConsumed, onPlayerStateChange: onPlayerStateChange, onSpeedChange: onSpeedChange, onError: onError } };
 })();

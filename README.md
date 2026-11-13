@@ -6,10 +6,10 @@ Type a Japanese word, hear it said in real YouTube videos, then study it.
 - You see how many videos use the word, and **Next video** jumps to another one.
 - You can type kanji (`食べる`), kana (`たべる`), romaji (`taberu`) or a conjugated form (`食べた`).
 - Replay the sentence, go back 5 seconds, slow the speech down, or let it move through videos by itself.
-- Each word shows its reading, meaning and **JLPT level** (N5 to N1, or not on the lists).
+- Each word shows its reading, meaning and **JLPT level**, with how the level was decided (see below).
 - **Furigana** over the kanji in the video captions (with an on/off switch), in the example sentences, and in the sentence shown after you answer a practice question.
 - **Example sentences** with English translations.
-- **Practice**: questions from the official JLPT practice workbook when your word appears in one, and questions in JLPT format (kanji reading, fill in the blank, writing in kanji) made from the example sentences. Tap an answer to check it.
+- **Practice, all in Japanese and in JLPT style**: questions from the official JLPT practice workbook when your word appears in one, and practice questions in the six JLPT vocabulary formats: 漢字読み, 表記, 語形成, 文脈規定, 言い換え類義 and 用法. Instructions are worded as each level's test booklet words them. Tap an answer to check it.
 - Save words and reopen recent searches.
 
 It is a plain website: it works in the browser on a laptop and on a phone.
@@ -36,9 +36,15 @@ Open the address on the phone, then:
 
 - Search results, timing and captions come from [YouGlish](https://youglish.com/japanese) through its official widget. The count is the number of videos in YouGlish's Japanese index, not all of YouTube. The widget is free for non-commercial education use.
 - Videos play in the YouTube player, so the [YouTube Terms of Service](https://www.youtube.com/t/terms) and the [Google Privacy Policy](https://policies.google.com/privacy) apply.
-- **JLPT levels are a best guess.** The JLPT has published no word list since 2010. The levels here are Jonathan Waller's widely used lists, the same ones Jisho shows.
+- **How JLPT levels are decided.** The JLPT has published no official word list since 2010, so levels combine independent evidence (`tools/build_levels.py`):
+  1. Jonathan Waller's lists (the ones Jisho shows), with the community corrections of the Open Anki JLPT decks.
+  2. The "egg rolls JLPT 10k" list, compiled from Chinese JLPT study books, about 10,000 words.
+  3. Real exams: words that appeared in at least 3 N4, N3 or N2 exams since 2010 are placed no higher than that level.
+  4. Words the official 2018 workbook tests at a given level.
+
+  When the lists agree the level is shown as is. When they disagree, the level nearer the word's frequency-based estimate is kept. Words on no list get an estimate, labelled "(estimate)", from a model trained on the listed words (how common the word is, the JLPT level of its kanji, length and part of speech); on held-out listed words it gets the exact level about half the time and is within one level about 90% of the time. Very rare words are labelled "Beyond N1". Counts: about 12,500 words from the lists or exams, about 9,900 estimated, about 2,100 beyond N1.
 - **Official questions** are the 162 vocabulary questions of the *Official Practice Workbook Vol. 2* (2018), all five levels, with their answer keys. Actual exam papers are not released, so this workbook is the official source there is. The 2012 workbook is published as scanned images and is not included.
-- **Practice questions are made by the page**, not by the JLPT. The wrong choices are picked automatically, so now and then one of them could also fit the sentence.
+- **Practice questions are made by the page**, not by the JLPT. Wrong choices are chosen to be close: readings that differ by one sound or one kanji's reading, kanji that look or sound alike, and words of the same kind and level that share a kanji. Because they are picked automatically, now and then a wrong choice could also fit; 用法 questions are only made for nouns, verbs and い-adjectives to keep that rare.
 - **Caption furigana is worked out by the page**, with the kuromoji tokenizer, because YouGlish captions come without readings. It is usually right but can misread names and unusual words. Its dictionary is 18 MB, downloaded once in the background and then kept by the browser; the *Furigana* button under the caption switches it off. Furigana in the example sentences comes from Tatoeba.
 - On phones the browser may wait for a tap on the video before it plays sound.
 - Saved words and history are kept in the browser you use. The laptop and the phone each have their own list.
@@ -49,9 +55,10 @@ Open the address on the phone, then:
 | File | What it is |
 |---|---|
 | `index.html`, `styles.css`, `app.js` | The page |
-| `data/dict.json` | 23,000 words: spelling, reading, meaning, JLPT level |
+| `data/dict.json` | 24,000 words: spelling, reading, meaning, JLPT level, synonyms, word formation, and kanji tables for the questions |
 | `data/ex/*.json` | 58,000 example sentences with translations, in 64 pieces loaded as needed |
 | `data/jlpt-official.json` | The official workbook questions and which words each one tests |
+| `tools/build_levels.py` | Combines the JLPT level sources and estimates the rest |
 | `tools/build_dict.py` | Rebuilds `data/dict.json` |
 | `tools/build_examples.py` | Rebuilds `data/ex/` from the Tatoeba exports |
 | `tools/build_jlpt_questions.py` | Rebuilds `data/jlpt-official.json` from the workbook PDFs |
@@ -65,7 +72,9 @@ Each build script says at its top where its input files come from.
 
 - [YouGlish](https://youglish.com) for the video index, timing and captions.
 - [JMdict](https://www.edrdg.org/jmdict/j_jmdict.html) and KANJIDIC2 © Electronic Dictionary Research and Development Group, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). `data/dict.json` is derived from them and carries the same licence.
-- JLPT levels from [Jonathan Waller's JLPT Resources](http://www.tanos.co.uk/jlpt/), CC BY, matched to JMdict entries by [stephenmk/yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab).
+- JLPT levels: [Jonathan Waller's JLPT Resources](http://www.tanos.co.uk/jlpt/), CC BY, matched to JMdict entries by [stephenmk/yomitan-jlpt-vocab](https://github.com/stephenmk/yomitan-jlpt-vocab) and corrected by [jamsinclair/open-anki-jlpt-decks](https://github.com/jamsinclair/open-anki-jlpt-decks); the "egg rolls JLPT 10k" list via [@polyglot-bundles/ja-jlpt-syllabi](https://www.npmjs.com/package/@polyglot-bundles/ja-jlpt-syllabi); exam word counts from the N2, N3 and N4 summaries of [IreneZihuiLi](https://github.com/IreneZihuiLi/jlpt-n2-stats) (counts only; no exam text is used); estimates with [wordfreq](https://github.com/rspeer/wordfreq) (data CC BY-SA 4.0).
+- Synonyms: [Japanese WordNet](https://bond-lab.github.io/wnja/) © 2009-2011 NICT, via the Open Multilingual Wordnet data.
+- Look-alike kanji: Lars Yencken's kanji confusion datasets (CC BY 3.0) and KanjiVG (CC BY-SA 3.0), via [@johnmorrisdotca/jisho](https://www.npmjs.com/package/@johnmorrisdotca/jisho).
 - Example sentences from [Tatoeba](https://tatoeba.org), [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/). Each sentence links to its Tatoeba page and names its author where known.
 - Official questions. Source: Official Worldwide Japanese-Language Proficiency Test Website (https://www.jlpt.jp/), *Japanese-Language Proficiency Test Official Practice Workbook Vol. 2*. Used under the site policy for Japanese-language education at no charge; copyright stays with the Japan Foundation and Japan Educational Exchanges and Services.
 - [WanaKana](https://github.com/WaniKani/WanaKana), MIT licence (`vendor/wanakana.LICENSE.txt`).
