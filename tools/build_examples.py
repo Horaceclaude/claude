@@ -9,10 +9,12 @@ Inputs (from https://downloads.tatoeba.org/exports/, CC BY 2.0 FR)
 Usage: python3 tools/build_examples.py data/dict.json TATOEBA_DIR data/ex
 
 Each shard maps a JMdict entry number to up to 6 sentences:
-  [Japanese, English, Tatoeba sentence number, author of the Japanese sentence, the word as written in it]
+  [Japanese, English, Tatoeba sentence number, author of the Japanese sentence, the word as written in it,
+   phrase (文節) boundaries in the plain sentence, for word-order questions]
 The Japanese carries the reading of each kanji in braces, 学{がっ}校{こう}へ行{い}く, where Tatoeba has one.
 """
 import sys, os, re, bz2, json, collections
+from sudachipy import Dictionary, SplitMode
 
 dict_path, tdir, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 SHARDS, PER_WORD = 64, 6
@@ -88,6 +90,22 @@ if os.path.exists(tr_path):
             READ[i] = re.sub(r'\[([^\]]*)\]', ruby, p[4])
 EN = load('eng_sentences_detailed.tsv.bz2', need_e)
 
+TOK = Dictionary().create()
+CONTENT = {'名詞', '動詞', '形容詞', '副詞', '連体詞', '接続詞', '感動詞', '代名詞', '形状詞', '接頭辞'}
+def phrases(sentence):
+    """Phrase boundaries: a content word starts a phrase; particles, endings and helper verbs join the one before."""
+    cuts, prev = [0], None
+    for m in TOK.tokenize(sentence, SplitMode.C):
+        pos = m.part_of_speech()
+        joins = prev is not None and (prev[0] == '接頭辞' or (pos[0] == '名詞' and prev[0] == '名詞')
+                                      or (pos[0] == '動詞' and pos[1] == '非自立可能' and prev[0] in ('助詞', '助動詞'))
+                                      or (pos[0] == '動詞' and prev[0] == '動詞' and prev[5].startswith('連用形'))
+                                      or (pos[0] == '動詞' and m.dictionary_form() in ('する', 'できる') and prev[0] == '名詞')
+                                      or (pos[0] == '形容詞' and pos[1] == '非自立可能'))
+        if pos[0] in CONTENT and not joins and m.begin() > 0 and m.begin() != cuts[-1]: cuts.append(m.begin())
+        prev = pos
+    return cuts
+
 shards = [dict() for _ in range(SHARDS)]
 kept = words = 0
 for eid, lst in cands.items():
@@ -114,6 +132,7 @@ for eid, lst in cands.items():
             if s[3] in picked or forms[s[3][4]] >= limit: continue
             picked.append(s[3]); forms[s[3][4]] += 1
     if picked:
+        for row in picked: row.append(phrases(re.sub(r'\{[^}]*\}', '', row[0])))
         shards[eid % SHARDS][str(eid)] = picked
         kept += len(picked); words += 1
 

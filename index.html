@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
-<link rel="stylesheet" href="styles.css?v=202611130626">
+<link rel="stylesheet" href="styles.css?v=202611130743">
 <script>
   // Apply a saved light/dark choice before first paint.
   try { var t = localStorage.getItem('kikitori.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
@@ -130,6 +130,13 @@
       <p class="word-level" id="word-level" hidden><span id="word-jlpt" class="jlpt"></span><span id="word-jlpt-note" class="level-note"></span></p>
     </section>
 
+    <section id="grammar" class="grammar" hidden aria-label="Grammar used with this word">
+      <div class="panel-head">
+        <h2>Grammar used with this word</h2>
+      </div>
+      <ul class="gr-list" id="grammar-list"></ul>
+    </section>
+
     <section id="study" class="study" hidden aria-label="Study this word">
       <div class="study-block" id="examples-block">
         <div class="panel-head">
@@ -152,8 +159,13 @@
           <h2 lang="ja">練習問題（JLPT形式）</h2>
           <button class="link-btn" id="practice-new" type="button" lang="ja">別の問題にする</button>
         </div>
-        <p class="study-note" lang="ja">例文をもとに、このページが自動で作った問題です。公式の問題ではありません。</p>
+        <p class="study-note" lang="ja">語彙と文法の問題は、例文をもとにこのページが自動で作ったものです。読解と文章の文法は、このサイトのために書いたオリジナルの文章です。どれも公式の問題ではありません。ふりがなは、答えたあとで表示されます。</p>
+        <h3 class="sec-h" id="sec-vocab" lang="ja">語彙</h3>
         <div class="q-list" id="practice-list"></div>
+        <h3 class="sec-h" id="sec-grammar" lang="ja" hidden>文法</h3>
+        <div class="q-list" id="grammar-practice"></div>
+        <h3 class="sec-h" id="sec-reading" lang="ja" hidden>読解</h3>
+        <div class="q-list" id="reading-practice"></div>
       </div>
     </section>
 
@@ -198,7 +210,7 @@
 <footer class="foot">
   <div class="wrap">
     <p>Video search, timing and captions come from <a href="https://youglish.com/japanese" target="_blank" rel="noopener">YouGlish</a>. Videos play in the YouTube player, so the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a> apply, and both services may set cookies.</p>
-    <p>Word meanings: <a href="https://www.edrdg.org/jmdict/j_jmdict.html" target="_blank" rel="noopener">JMdict</a> and KANJIDIC2 © EDRDG, CC BY-SA 4.0. JLPT levels combine <a href="http://www.tanos.co.uk/jlpt/" target="_blank" rel="noopener">Jonathan Waller's lists</a> (CC BY), the "egg rolls JLPT 10k" list from Chinese JLPT study books, word counts from real N4–N2 exams, and the official workbook; words on no list are estimated with <a href="https://github.com/rspeer/wordfreq" target="_blank" rel="noopener">wordfreq</a> (CC BY-SA 4.0). The JLPT itself publishes no word list. Example sentences: <a href="https://tatoeba.org" target="_blank" rel="noopener">Tatoeba</a>, CC BY 2.0 FR. Synonyms: Japanese WordNet © NICT. Look-alike kanji: Lars Yencken's kanji confusion data and KanjiVG, CC BY-SA 3.0. Caption furigana: kuromoji.js (Apache 2.0) with the IPA dictionary; it is worked out automatically and can be wrong. Romaji conversion: WanaKana (MIT).</p>
+    <p>Word meanings: <a href="https://www.edrdg.org/jmdict/j_jmdict.html" target="_blank" rel="noopener">JMdict</a> and KANJIDIC2 © EDRDG, CC BY-SA 4.0. JLPT levels combine <a href="http://www.tanos.co.uk/jlpt/" target="_blank" rel="noopener">Jonathan Waller's lists</a> (CC BY), the "egg rolls JLPT 10k" list from Chinese JLPT study books, word counts from real N4–N2 exams, and the official workbook; words on no list are estimated with <a href="https://github.com/rspeer/wordfreq" target="_blank" rel="noopener">wordfreq</a> (CC BY-SA 4.0). The JLPT itself publishes no word list. Example sentences: <a href="https://tatoeba.org" target="_blank" rel="noopener">Tatoeba</a>, CC BY 2.0 FR. Grammar points, levels and English explanations: <a href="https://github.com/evanclan/OpenJLPT" target="_blank" rel="noopener">OpenJLPT</a> (CC BY-SA 4.0); how often each is used with a word is counted in Tatoeba. Reading and text-grammar passages are original to this site. Synonyms: Japanese WordNet © NICT. Look-alike kanji: Lars Yencken's kanji confusion data and KanjiVG, CC BY-SA 3.0. Caption furigana: kuromoji.js (Apache 2.0) with the IPA dictionary; it is worked out automatically and can be wrong. Romaji conversion: WanaKana (MIT).</p>
     <p>Official questions. Source: Official Worldwide Japanese-Language Proficiency Test Website (<a href="https://www.jlpt.jp/" target="_blank" rel="noopener">https://www.jlpt.jp/</a>), Official Practice Workbook Vol. 2. A personal, non-commercial study tool. Your saved words and history stay in this browser.</p>
   </div>
 </footer>
@@ -206,6 +218,6 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="vendor/wanakana.min.js" defer></script>
-<script src="app.js?v=202611130626" defer></script>
+<script src="app.js?v=202611130743" defer></script>
 </body>
 </html>

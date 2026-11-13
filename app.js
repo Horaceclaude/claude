@@ -597,7 +597,7 @@
     return study.shards.get(key);
   }
   // The sentence arrives with readings in braces, 学{がっ}校{こう}; keep that for display and a plain copy for everything else.
-  const rowToEx = (x) => ({ ja: x[0].replace(/\{[^}]*\}/g, ''), furi: x[0], en: x[1], id: x[2], by: x[3], form: x[4] });
+  const rowToEx = (x) => ({ ja: x[0].replace(/\{[^}]*\}/g, ''), furi: x[0], en: x[1], id: x[2], by: x[3], form: x[4], cuts: x[5] || null });
   function loadExamples(id) { return loadShard(id).then((sh) => (sh[id] || []).map(rowToEx)); }
   function loadOfficial() {
     if (!study.official) study.official = fetch('data/jlpt-official.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -613,21 +613,26 @@
   }
   // A sentence with readings in braces becomes <ruby> elements; the searched word is wrapped in <mark>.
   // Draw text pieces, some with a reading (<ruby>), wrapping the given character ranges in <mark>.
+  // Ranges are [from, to] (highlighted) or [from, to, 'u'] (underlined).
   function drawRuby(node, segs, ranges) {
     node.textContent = '';
-    const inside = (at, len) => ranges.some((r) => at < r[1] && at + len > r[0]);
-    let mark = null;
-    const target = (hit) => { if (!hit) { mark = null; return node; } if (!mark) { mark = el('mark'); node.appendChild(mark); } return mark; };
+    const tagAt = (at, len) => { for (const r of ranges) if (at < r[1] && at + len > r[0]) return r[2] || 'mark'; return null; };
+    let box = null, boxTag = null;
+    const target = (tag) => {
+      if (!tag) { box = null; boxTag = null; return node; }
+      if (!box || boxTag !== tag) { box = el(tag); boxTag = tag; node.appendChild(box); }
+      return box;
+    };
     for (const s of segs) {
       if (s.r) {
         // The highlight goes on the word only, inside the <ruby>, so its reading stays above the coloured box.
-        const hit = inside(s.at, s.t.length), ruby = el('ruby', hit ? { class: 'hit' } : null);
-        ruby.appendChild(hit ? el('mark', null, s.t) : document.createTextNode(s.t));
+        const tag = tagAt(s.at, s.t.length), ruby = el('ruby', tag ? { class: tag === 'mark' ? 'hit' : 'hit-u' } : null);
+        ruby.appendChild(tag ? el(tag, null, s.t) : document.createTextNode(s.t));
         ruby.appendChild(el('rt', null, s.r));
-        mark = null;
+        box = null; boxTag = null;
         node.appendChild(ruby);
       } else {
-        for (let i = 0; i < s.t.length; i++) target(inside(s.at + i, 1)).appendChild(document.createTextNode(s.t[i]));
+        for (let i = 0; i < s.t.length; i++) target(tagAt(s.at + i, 1)).appendChild(document.createTextNode(s.t[i]));
       }
     }
     node.normalize();
@@ -757,9 +762,12 @@
     $('#examples-more').hidden = true;
     $('#official-block').hidden = true;
     $('#practice-block').hidden = true;
+    $('#grammar-practice').textContent = ''; $('#reading-practice').textContent = '';
+    $('#sec-grammar').hidden = true; $('#sec-reading').hidden = true;
     const empty = $('#examples-empty');
     empty.hidden = false;
     renderOfficial(my);
+    const grammarReady = renderGrammar(ambiguous ? null : e, my);
     if (!study.entry) {
       empty.textContent = ambiguous
         ? 'This spelling can be several words. Pick one above to see its examples and practice.'
@@ -767,11 +775,12 @@
       return;
     }
     empty.textContent = 'Loading examples…';
-    Promise.all([loadExamples(e.id), loadShard(e.id)]).then(([list, shard]) => {
+    Promise.all([loadExamples(e.id), loadShard(e.id), grammarReady]).then(([list, shard]) => {
       if (my !== study.seq) return;
       study.examples = list; study.shardData = shard;
       renderExamples();
       renderPractice();
+      renderGrammarPractice();
     });
   }
 
@@ -814,11 +823,13 @@
     const result = el('p', { class: 'q-result', role: 'status', lang: 'ja' });
     const after = el('div', { class: 'q-after' });
     after.hidden = true;
+    const spans = [];
     spec.opts.forEach((o, i) => {
       const li = el('li'), b = el('button', { type: 'button', class: 'q-opt', lang: 'ja' });
       b.appendChild(el('span', { class: 'n' }, String(i + 1)));
       const t = el('span');
       renderMarked(t, o);
+      spans.push(t);
       b.appendChild(t);
       b.addEventListener('click', () => {
         const all = ol.querySelectorAll('button');
@@ -828,6 +839,8 @@
         result.textContent = i === spec.ans ? '正解です。' : '不正解です。正しい答えは ' + (spec.ans + 1) + ' です。';
         result.className = 'q-result ' + (i === spec.ans ? 'ok' : 'no');
         if (spec.after) after.hidden = false;
+        furiganize(stem, spec.stem);                               // readings appear only once the question is answered
+        spans.forEach((sp, k) => furiganize(sp, spec.opts[k]));
       });
       li.appendChild(b); ol.appendChild(li);
     });
@@ -930,10 +943,15 @@
   function pool(cls) {
     if (!study.pools) {
       study.pools = new Map();
-      dict.entries.forEach((raw, i) => { if (!raw[7] || !raw[8]) return; const a = study.pools.get(raw[8]); if (a) a.push(i); else study.pools.set(raw[8], [i]); });
+      dict.entries.forEach((raw, i) => {
+        if (!raw[7]) return;
+        const key = raw[8] || 'pos:' + raw[3];                 // words with no inflection class pool by part of speech
+        const a = study.pools.get(key); if (a) a.push(i); else study.pools.set(key, [i]);
+      });
     }
     return study.pools.get(cls) || [];
   }
+  const poolKey = (e) => e.cls || 'pos:' + e.pos;
   function byId(id) {
     if (!dict.byId) { dict.byId = new Map(); dict.entries.forEach((raw, i) => dict.byId.set(raw[6], i)); }
     const i = dict.byId.get(id);
@@ -963,7 +981,7 @@
   // Wrong choices of the same kind and a similar level, put into the same form. The closer they look to the answer, the better.
   function pickWords(e, parts, n, opts) {
     const level = e.jlpt || 1, seen = new Set([opts.right]), cands = [];
-    for (const i of shuffle(pool(e.cls)).slice(0, 600)) {
+    for (const i of shuffle(pool(poolKey(e))).slice(0, 600)) {
       const o = entryAt(i);
       if (o.id === e.id || !o.jlpt || Math.abs(o.jlpt - level) > 1 || related(e, o)) continue;
       if (opts.avoid && opts.avoid.some((a) => a.id === o.id || related(a, o))) continue;
@@ -1040,7 +1058,27 @@
   }
 
   // 表記: kanji that sound the same or look alike, in the grid the test uses (満足／万足／満続／万続).
+  // Katakana that look alike, as the N5 and N4 tests use them (ワイシャツ / ワイシャソ / ウイシャツ).
+  const KATA_LIKE = { シ: 'ツ', ツ: 'シ', ソ: 'ン', ン: 'ソ', ク: 'ケタ', ケ: 'ク', タ: 'ク', ウ: 'ワ', ワ: 'ウ', ス: 'ヌ', ヌ: 'ス', ナ: 'メ', メ: 'ナ',
+    ル: 'レ', レ: 'ル', チ: 'テ', テ: 'チ', ロ: 'コ', コ: 'ロ', ア: 'マ', マ: 'ア', フ: 'ワ', ノ: 'メ', ト: 'ド', ド: 'ト', バ: 'パ', パ: 'バ', ビ: 'ピ', ピ: 'ビ',
+    ブ: 'プ', プ: 'ブ', ベ: 'ペ', ペ: 'ベ', ボ: 'ポ', ポ: 'ボ', ャ: 'ヤ', ュ: 'ユ', ョ: 'ヨ', ッ: 'ツ', ー: '' };
+  function makeKatakana(e, x) {
+    const w = x.form;
+    if (!IS_KATA(w) || w.length < 2) return null;
+    const spots = Array.from(w).map((c, i) => (KATA_LIKE[c] != null ? i : -1)).filter((i) => i >= 0);
+    if (!spots.length) return null;
+    const swap = (i) => { const alts = KATA_LIKE[w[i]]; return alts === '' ? '' : alts[Math.floor(Math.random() * alts.length)]; };
+    const make = (rep) => Array.from(w).map((c, i) => (rep[i] != null ? rep[i] : c)).join('');
+    const wrong = new Set();
+    const pick = shuffle(spots).slice(0, 2);
+    if (pick.length === 2) { const A = swap(pick[0]), B = swap(pick[1]); [make({ [pick[0]]: A }), make({ [pick[1]]: B }), make({ [pick[0]]: A, [pick[1]]: B })].forEach((v) => wrong.add(v)); }
+    for (let t = 0; t < 30 && wrong.size < 3; t++) { const i = spots[Math.floor(Math.random() * spots.length)]; wrong.add(make({ [i]: swap(i) })); }
+    wrong.delete(w);
+    const kana = Array.from(w).map((c) => (c >= '\u30a1' && c <= '\u30f6' ? String.fromCharCode(c.charCodeAt(0) - 0x60) : c)).join('');
+    return finish('orthography', wrapFirst(x.ja, w, U0 + kana + U1), w, Array.from(wrong), x, e);
+  }
   function makeWriting(e, x) {
+    if (IS_KATA(x.form)) return makeKatakana(e, x);
     const parts = formParts(e, x.form);
     if (!parts || !RE_KANJI.test(x.form)) return null;
     const chars = Array.from(x.form), kidx = chars.map((c, i) => (RE_KANJI.test(c) && c !== '々' ? i : -1)).filter((i) => i >= 0);
@@ -1097,7 +1135,6 @@
 
   // 言い換え類義: the word closest in meaning. At N5 and N4 the choices are whole sentences, as in the test.
   function makeParaphrase(e, x) {
-    if (!e.syn.length) return null;
     const parts = formParts(e, x.form);
     if (!parts) return null;
     // Only a close match: each word's main meaning must appear among the other's meanings (訓練 "training" / 練習 "practice; training").
@@ -1108,6 +1145,15 @@
       s = lookupExact(w).find((o) => o.cls === e.cls && o.pos === e.pos && o.id !== e.id && meets(o, e) && meets(e, o)
         && e.primary.indexOf(o.primary) < 0 && o.primary.indexOf(e.primary) < 0) || null;     // not 時 for 時間
       if (s) break;
+    }
+    if (!s) {                                                  // no thesaurus synonym: a word of the same kind with the same main meaning
+      let best = null;
+      for (const i of pool(poolKey(e))) {
+        const o = entryAt(i);
+        if (o.id === e.id || o.pos !== e.pos || !o.jlpt || o.jlpt < (e.jlpt || 1) - 1 || o.primary.indexOf(e.primary) >= 0 || e.primary.indexOf(o.primary) >= 0) continue;
+        if (meets(o, e) && meets(e, o) && related(e, o) && (!best || o.rank < best.rank)) best = o;
+      }
+      s = best;
     }
     if (!s) return null;
     const right = inflectAs(s, parts, false);
@@ -1125,14 +1171,16 @@
   function makeUsage(e, x) {
     const sh = study.shardData;
     // Not for adverbs and な-adjectives: swapped into another word's sentence they too often still make sense.
-    if (!sh || !/^(n|vs|v1|v5[a-z]|adj-i)$/.test(e.cls) || x.ja.length > 34) return null;
+    if (!sh || !(/^(n|vs|v1|v5[a-z]|adj-i)$/.test(e.cls) || (x.lastResort && /^(adv|adj-na|)$/.test(e.cls))) || x.ja.length > 34) return null;
     const parts = formParts(e, x.form);
     if (!parts) return null;
     const level = e.jlpt || 1, wrong = [];
+    // Adverbs and な-adjectives (only when nothing else is possible) go into a noun's place, so the wrong sentences are clearly wrong.
+    const fromCls = x.lastResort && /^(adv|adj-na|)$/.test(e.cls) ? 'n' : e.cls;
     for (const id of shuffle(Object.keys(sh))) {
       if (wrong.length >= 3) break;
       const o = byId(+id);
-      if (!o || o.id === e.id || o.cls !== e.cls || !o.jlpt || Math.abs(o.jlpt - level) > 2 || related(e, o)) continue;
+      if (!o || o.id === e.id || o.cls !== fromCls || !o.jlpt || Math.abs(o.jlpt - level) > 2 || related(e, o)) continue;
       for (const row of shuffle(sh[id])) {
         const y = rowToEx(row), yform = normForm(o, y.form);
         if (y.ja.length > 34 || y.ja.indexOf(e.primary) >= 0 || /[A-Za-zＡ-Ｚａ-ｚ]/.test(y.ja)) continue;
@@ -1170,16 +1218,38 @@
     if (!sentences.length && state.targetText && state.targetText.indexOf(study.query) >= 0) {
       sentences = [{ ja: state.targetText, en: '', id: 0, by: '', form: study.query }];   // fall back to the caption on screen
     }
-    const slots = [], usedIds = new Set();
+    const slots = [], usedIds = new Set(), made = new Set();
     for (const [type, make] of MAKERS) {
       let spec = null;
       const order = sentences.filter((x) => !usedIds.has(x.id)).concat(sentences.filter((x) => usedIds.has(x.id)));
       for (const x of order) { spec = make(e, x); if (spec) { usedIds.add(x.id); break; } }
-      if (spec) slots.push(spec);
-      else if (type === 'formation' && !e.formation && dict.compounds && dict.compounds[e.primary]) slots.push(formationFromBase(e));
+      if (spec) { slots.push(spec); made.add(type); }
+      else if (type === 'formation' && !e.formation && dict.compounds && dict.compounds[e.primary]) { slots.push(formationFromBase(e)); made.add(type); }
+    }
+    // At least three kinds: when the examples are not enough, use the caption on screen, then the word on its own.
+    if (made.size < 3) {
+      const extra = sentences.slice();                             // the examples again (用法 may now use its last-resort form)
+      for (const r of (study.grammarRows || [])) {                 // sentences found while counting grammar
+        const ex = r[3], b = parseBraces(ex[0]);
+        if (ex[4] > ex[3] && !sentences.some((x) => x.id === ex[2])) extra.push({ ja: b.plain, furi: ex[0], en: ex[1], id: ex[2], by: '', form: normForm(e, b.plain.slice(ex[3], ex[4])) });
+      }
+      const cap = state.targetText || '';
+      const head = e.kanji.concat(e.kana).find((w) => cap.indexOf(w) >= 0);
+      if (head) extra.push({ ja: cap, furi: cap, en: '', id: 0, by: '', form: head });
+      extra.push({ ja: e.primary, furi: e.primary, en: '', id: 0, by: '', form: e.primary, alone: true });
+      for (const [type, make] of MAKERS) {
+        if (made.size >= 3) break;
+        if (made.has(type)) continue;
+        for (const x0 of extra) {
+          if (x0.alone && !/^(reading|orthography|paraphrase)$/.test(type)) continue;
+          const x = type === 'usage' ? Object.assign({ lastResort: true }, x0) : x0;
+          const spec = make(e, x);
+          if (spec) { slots.splice(MAKERS.findIndex((m) => m[0] === type), 0, spec); made.add(type); break; }
+        }
+      }
     }
     let n = 0;
-    const number = () => { box.querySelectorAll('.q-kicker').forEach((k, i) => { k.textContent = '練習問題 ' + (i + 1) + '　' + k.dataset.type; }); };
+    const number = () => { box.querySelectorAll('.q-kicker').forEach((k, i) => { k.textContent = '問題 ' + (i + 1) + '　' + k.dataset.type; }); };
     for (const s of slots) {
       if (s && typeof s.then === 'function') {
         const holder = el('div');
@@ -1195,6 +1265,307 @@
     const card = questionCard(spec);
     card.querySelector('.q-kicker').dataset.type = TYPE_JA[spec.type];
     return card;
+  }
+
+  /* ---------- grammar used with the word, grammar questions, reading passages ---------- */
+  const BASIC_G = new Set(['masu', 'nai', 'te', 'ta', 'desu', 'ku-nai-katta-ku-nakatta', 'ou-you']);
+  const KIND_LABEL = { verb: 'verbs', suru: 'する-nouns', 'i-adj': 'い-adjectives', 'na-adj': 'な-adjectives', noun: 'nouns' };
+  const kindKey = (e) => (e.cls.startsWith('v') && e.cls !== 'vs' ? 'verb' : { vs: 'suru', 'adj-i': 'i-adj', 'adj-na': 'na-adj' }[e.cls] || 'noun');
+  const band = (level) => (level >= 4 ? 5 : level === 3 ? 3 : 2);        // instruction wording: N5-N4, N3, N2-N1
+  const GRAMMAR_INSTR = {
+    form: { 5: '（　　　）に 何を 入れますか。１・２・３・４から いちばん いい ものを 一つ えらんで ください。',
+      3: '次の文の（　　　）に入れるのに最もよいものを、１・２・３・４から一つえらびなさい。',
+      2: '次の文の（　　　）に入れるのに最もよいものを、１・２・３・４から一つ選びなさい。' },
+    star: { 5: '★に 入る ものは どれですか。１・２・３・４から いちばん いい ものを 一つ えらんで ください。',
+      3: '次の文の　★　に入る最もよいものを、１・２・３・４から一つえらびなさい。',
+      2: '次の文の　★　に入る最もよいものを、１・２・３・４から一つ選びなさい。' },
+    text: { 5: 'つぎの ぶんしょうを 読んで、（ 1 ）から（ 3 ）に 何を 入れますか。ぶんしょうの いみを 考えて、１・２・３・４から いちばん いい ものを 一つ えらんで ください。',
+      3: '次の文章を読んで、文章全体の内容を考えて、（ 1 ）から（ 3 ）の中に入る最もよいものを、１・２・３・４から一つえらびなさい。',
+      2: '次の文章を読んで、文章全体の趣旨を踏まえて、（ 1 ）から（ 3 ）の中に入る最もよいものを、１・２・３・４から一つ選びなさい。' }
+  };
+  const READING_INSTR = {
+    5: 'つぎの ぶんしょうを 読んで、しつもんに こたえて ください。こたえは、１・２・３・４から いちばん いい ものを 一つ えらんで ください。',
+    3: '次の文章を読んで、質問に答えなさい。答えは、１・２・３・４から最もよいものを一つえらびなさい。',
+    2: '次の文章を読んで、後の問いに対する答えとして最もよいものを、１・２・３・４から一つ選びなさい。',
+    integrated: '次のAとBの文章を読んで、後の問いに対する答えとして最もよいものを、１・２・３・４から一つ選びなさい。',
+    info5: 'つぎの あんないを 見て、しつもんに こたえて ください。こたえは、１・２・３・４から いちばん いい ものを 一つ えらんで ください。',
+    info3: '次の案内を読んで、下の質問に答えなさい。答えは、１・２・３・４から最もよいものを一つえらびなさい。',
+    info2: '次の案内を読んで、下の問いに対する答えとして最もよいものを、１・２・３・４から一つ選びなさい。'
+  };
+  const READING_TYPE = { short: '内容理解（短文）', mid: '内容理解（中文）', long: '内容理解（長文）', integrated: '統合理解', thematic: '主張理解（長文）', info: '情報検索' };
+  const loaders = {};
+  const loadJSON = (path) => (loaders[path] = loaders[path] || fetch(path).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  const loadGrammarShard = (id) => loadJSON('data/gr/' + String(id % 64).padStart(2, '0') + '.json');
+
+  // Text with readings in braces -> pieces for drawRuby, and the plain text.
+  function parseBraces(furiText) {
+    const segs = [], re = /([^{}])\{([^}]*)\}|([^{}]+?)(?=[^{}]\{|$)/g;
+    let m, plain = '';
+    while ((m = re.exec(furiText))) {
+      const t = m[1] != null ? m[1] : m[3], r = m[1] != null ? m[2] : '', prev = segs[segs.length - 1];
+      if (r && prev && prev.r) { prev.t += t; prev.r += r; } else segs.push({ t: t, r: r, at: plain.length });
+      plain += t;
+    }
+    return { segs: segs, plain: plain };
+  }
+  // ⟦underlined⟧ text -> plain text and ranges to underline.
+  function markedToRanges(text) {
+    let plain = '', open = -1;
+    const ranges = [];
+    for (const ch of String(text)) {
+      if (ch === U0) open = plain.length;
+      else if (ch === U1) { if (open >= 0) ranges.push([open, plain.length, 'u']); open = -1; }
+      else plain += ch;
+    }
+    return { plain: plain, ranges: ranges };
+  }
+  // Furigana for any question text, added only once the question is answered.
+  function furiganize(node, text) {
+    if (!node || !RE_KANJI.test(text)) return;
+    loadTokenizer().then((ok) => {
+      if (!ok || !furi.tokenizer) return;
+      const m = markedToRanges(text);
+      try { drawRuby(node, captionSegs(m.plain), m.ranges); node.classList.add('has-furi'); } catch (e) { /* keep the plain text */ }
+    });
+  }
+
+  /* The grammar panel under the word: patterns counted with this word in Tatoeba, else typical ones for its kind and level. */
+  function renderGrammar(e, my) {
+    const box = $('#grammar'), list = $('#grammar-list');
+    list.textContent = ''; box.hidden = true; study.grammarRows = [];
+    if (!e) return Promise.resolve();
+    return Promise.all([loadJSON('data/grammar.json'), loadGrammarShard(e.id)]).then(([meta, sh]) => {
+      if (my !== study.seq || !meta) return;
+      study.grammarMeta = meta;
+      const rows = ((sh && sh[e.id]) || []).filter((r) => meta.points[r[0]]);
+      study.grammarRows = rows;
+      const shown = new Set();
+      for (const r of rows) { list.appendChild(grammarItem(meta.points[r[0]], r, e)); shown.add(r[0]); }
+      const key = kindKey(e) + '-' + (e.jlpt || 1);
+      const fallback = /^(adv|)$/.test(e.cls) ? [] : (meta.defaults[key] || []);   // no typical list for adverbs and particles
+      for (const g of fallback) {
+        if (shown.size >= 3) break;
+        if (shown.has(g) || !meta.points[g]) continue;
+        list.appendChild(grammarItem(meta.points[g], null, e)); shown.add(g);
+      }
+      box.hidden = list.children.length === 0;
+    });
+  }
+  function grammarItem(p, row, e) {
+    const li = el('li', { class: 'gr-item' });
+    const head = el('div', { class: 'gr-head' });
+    head.appendChild(el('span', { class: 'gr-pat', lang: 'ja' }, p[0]));
+    head.appendChild(el('span', { class: 'jlpt-mini', 'data-level': String(p[1]) }, 'N' + p[1]));
+    li.appendChild(head);
+    li.appendChild(el('p', { class: 'gr-mean' }, p[2]));
+    const form = el('p', { class: 'gr-form' });
+    form.appendChild(el('span', { class: 'gr-label' }, 'How it attaches: '));
+    form.appendChild(document.createTextNode(p[3]));
+    li.appendChild(form);
+    if (row) {
+      const ex = row[3], b = parseBraces(ex[0]);
+      li.appendChild(el('p', { class: 'gr-count' }, 'Used with this word in ' + row[1] + ' of the ' + row[2] + ' Tatoeba sentences checked. Example:'));
+      const ja = el('p', { class: 'gr-ex', lang: 'ja' });
+      drawRuby(ja, b.segs, [[ex[3], ex[4], 'mark'], [ex[5], Math.max(ex[6], ex[5]), 'u']]);
+      li.appendChild(ja);
+      if (ex[1]) li.appendChild(el('p', { class: 'ex-en' }, ex[1]));
+    } else {
+      li.appendChild(el('p', { class: 'gr-count' }, 'Common with ' + KIND_LABEL[kindKey(e)] + ' at JLPT N' + (e.jlpt || 1) + '. Too few sentences use this word to count its own patterns.'));
+    }
+    return li;
+  }
+
+  // A grammar point's own form as a choice: "〜たらどう" -> たらどう; patterns with a gap (まだ〜ていない) are not used.
+  function grammarForm(pattern) {
+    const f = String(pattern).split(' / ')[0].replace(/（[^）]*）|\([^)]*\)/g, '').replace(/^〜/, '').trim();
+    return f && f.indexOf('〜') < 0 && f.length >= 2 && f.length <= 8 && /^[\u3040-\u30ff\u4e00-\u9fff々ー]+$/.test(f) ? f : '';
+  }
+  /* 文法形式の判断: the grammar after the word is blanked. Wrong choices attach to a different form, so only one fits. */
+  function makeGrammarForm(e, row, meta) {
+    const g = row[0], p = meta.points[g], ex = row[3];
+    if (BASIC_G.has(g) || ex[6] <= ex[5]) return null;
+    const b = parseBraces(ex[0]), plain = b.plain, right = plain.slice(ex[5], ex[6]);
+    if (!right || right.length > 10 || plain.length > 45) return null;
+    const conns = new Set(p[5]);
+    // Everything that can follow the visible text before the blank, so that no "wrong" choice is in fact grammatical there:
+    // the endings of patterns attaching the same way (して + から), and endings that turn a stem into another form (食べ + ておく).
+    const fits = new Set();
+    for (const k in meta.points) {
+      const q = meta.points[k];
+      if (!q[5].some((c) => conns.has(c))) continue;
+      for (const s of [q[4], grammarForm(q[0]), grammarForm(q[0]).replace(/^[てでただ]/, '')]) if (s) fits.add(s);
+    }
+    const startsBad = conns.has('stem') || conns.has('nai') || conns.has('astem') ? /^[てでただなずさせられれよばけかくそ]/ : conns.has('ta') ? /^[らり]/ : null;
+    const cands = shuffle(Object.keys(meta.points)).filter((k) => {
+      const q = meta.points[k], f = grammarForm(q[0]);
+      if (k === g || BASIC_G.has(k) || !f || !q[5].length || q[5].some((c) => conns.has(c))) return false;
+      if (Math.abs(q[1] - p[1]) > 1 || (startsBad && startsBad.test(f))) return false;
+      for (const s of fits) if (s && (s === f || s.startsWith(f) || f.startsWith(s))) return false;
+      return f !== right && !right.startsWith(f) && !f.startsWith(right);
+    }).sort((x, y) => Math.abs(meta.points[x][1] - p[1]) - Math.abs(meta.points[y][1] - p[1]));
+    const wrong = Array.from(new Set(cands.map((k) => grammarForm(meta.points[k][0])))).slice(0, 3);
+    if (wrong.length < 3) return null;
+    const opts = shuffle([right].concat(wrong));
+    return {
+      kicker: '文法形式の判断', instr: GRAMMAR_INSTR.form[band(e.jlpt || 1)],
+      stem: plain.slice(0, ex[5]) + '（　　　）' + plain.slice(ex[6]), opts: opts, ans: opts.indexOf(right),
+      after: (box) => grammarAfter(box, b, ex, p),
+      source: (s) => { s.appendChild(document.createTextNode('例文：')); s.appendChild(el('a', { href: 'https://tatoeba.org/sentences/show/' + ex[2], target: '_blank', rel: 'noopener' }, 'Tatoeba #' + ex[2])); }
+    };
+  }
+  function grammarAfter(box, b, ex, p) {
+    const ja = el('p', { lang: 'ja' });
+    drawRuby(ja, b.segs, [[ex[5], Math.max(ex[6], ex[5]), 'u']]);
+    box.appendChild(ja);
+    if (ex[1]) box.appendChild(el('p', { class: 'q-en' }, ex[1]));
+    const note = el('p', { class: 'q-gram' });
+    note.appendChild(el('b', { lang: 'ja' }, p[0] + '（N' + p[1] + '）'));
+    note.appendChild(document.createTextNode(' ' + p[2] + '. Form: ' + p[3] + '.'));
+    box.appendChild(note);
+  }
+
+  /* 文の組み立て (★): four phrases of the sentence in a scrambled order; which one goes in the starred slot? */
+  function makeStar(e, row, meta) {
+    const ex = row[3], b = parseBraces(ex[0]), p = meta.points[row[0]];
+    return makeStarFrom(e, { plain: b.plain, cuts: ex[7], anchor: ex[6] > ex[5] ? ex[5] : ex[3], id: ex[2],
+      after: (box) => grammarAfter(box, b, ex, p) });
+  }
+  function makeStarFromExample(e, x) {
+    if (!x.cuts || !x.id) return null;
+    const at = x.ja.indexOf(x.form);
+    if (at < 0) return null;
+    return makeStarFrom(e, { plain: x.ja, cuts: x.cuts, anchor: at, id: x.id,
+      after: (box) => {
+        const ja = el('p', { lang: 'ja' });
+        renderFurigana(ja, x.furi || x.ja, x.form);
+        box.appendChild(ja);
+        if (x.en) box.appendChild(el('p', { class: 'q-en' }, x.en));
+      } });
+  }
+  function makeStarFrom(e, s) {
+    const plain = s.plain;
+    const tail = (plain.match(/[。！？!?」]+$/) || [''])[0], coreEnd = plain.length - tail.length;
+    const cuts = s.cuts.filter((c) => c < coreEnd).concat([coreEnd]);
+    const chunks = [];
+    for (let i = 0; i < cuts.length - 1; i++) if (cuts[i + 1] > cuts[i]) chunks.push([cuts[i], cuts[i + 1]]);
+    if (chunks.length < 5 || plain.length > 50) return null;
+    const starts = [];
+    for (let k = 0; k + 4 <= chunks.length; k++) {
+      if (chunks[k][0] <= s.anchor && s.anchor < chunks[k + 3][1] && (k > 0 || k + 4 < chunks.length)) starts.push(k);
+    }
+    for (const k of shuffle(starts)) {
+      const parts = chunks.slice(k, k + 4).map((c) => plain.slice(c[0], c[1]));
+      if (new Set(parts).size < 4 || parts.some((t) => t.length > 14 || /^[、,]/.test(t))) continue;
+      const star = 1 + Math.floor(Math.random() * 2);
+      const blanks = parts.map((_, i) => (i === star ? '＿★＿' : '＿＿＿')).join(' ');
+      const stem = plain.slice(0, chunks[k][0]) + ' ' + blanks + ' ' + plain.slice(chunks[k + 3][1]);
+      const opts = shuffle(parts);
+      return {
+        kicker: '文の組み立て', instr: GRAMMAR_INSTR.star[band(e.jlpt || 1)], stem: stem, opts: opts, ans: opts.indexOf(parts[star]),
+        after: (box) => { s.after(box); box.insertBefore(el('p', { class: 'q-order', lang: 'ja' }, '正しい順番：' + parts.join(' → ')), box.firstChild); },
+        source: (src) => { src.appendChild(document.createTextNode('例文：')); src.appendChild(el('a', { href: 'https://tatoeba.org/sentences/show/' + s.id, target: '_blank', rel: 'noopener' }, 'Tatoeba #' + s.id)); }
+      };
+    }
+    return null;
+  }
+
+  /* A passage with several questions: reading (読解) or text grammar (文章の文法). */
+  function subQuestion(label, stemText, opts, ans, onDone) {
+    const wrap = el('div', { class: 'sub-q' });
+    const stem = el('p', { class: 'sub-stem', lang: 'ja' });
+    stem.appendChild(el('span', { class: 'sub-label' }, label));
+    const stemText_ = el('span', null, stemText);
+    stem.appendChild(stemText_);
+    wrap.appendChild(stem);
+    const long = opts.some((o) => o.length > 9);
+    const ol = el('ol', { class: 'q-opts' + (long ? ' long' : '') });
+    const result = el('p', { class: 'q-result', role: 'status', lang: 'ja' });
+    const spans = [];
+    opts.forEach((o, i) => {
+      const li = el('li'), btn = el('button', { type: 'button', class: 'q-opt', lang: 'ja' });
+      btn.appendChild(el('span', { class: 'n' }, String(i + 1)));
+      const t = el('span', null, o); spans.push(t);
+      btn.appendChild(t);
+      btn.addEventListener('click', () => {
+        const all = ol.querySelectorAll('button');
+        all.forEach((x) => { x.disabled = true; });
+        all[ans].classList.add('right');
+        if (i !== ans) btn.classList.add('wrong');
+        result.textContent = i === ans ? '正解です。' : '不正解です。正しい答えは ' + (ans + 1) + ' です。';
+        result.className = 'q-result ' + (i === ans ? 'ok' : 'no');
+        furiganize(stemText_, stemText);
+        spans.forEach((sp, k) => furiganize(sp, opts[k]));
+        if (onDone) onDone();
+      });
+      li.appendChild(btn); ol.appendChild(li);
+    });
+    wrap.appendChild(ol); wrap.appendChild(result);
+    return wrap;
+  }
+  function passageCard(kicker, instr, texts, questions, source) {
+    const art = el('article', { class: 'q passage' });
+    art.appendChild(el('p', { class: 'q-kicker', lang: 'ja' }, kicker));
+    art.appendChild(el('p', { class: 'q-instr', lang: 'ja' }, instr));
+    const nodes = [];
+    const box = el('div', { class: 'passage-box' + (texts.length > 1 ? ' two' : '') });
+    for (const t of texts) { const p = el('div', { class: 'passage-text', lang: 'ja' }, t); nodes.push([p, t]); box.appendChild(p); }
+    art.appendChild(box);
+    let left = questions.length;
+    const done = () => { if (--left === 0) nodes.forEach(([n, t]) => furiganize(n, t)); };   // the passage gets furigana once every question is answered
+    questions.forEach((q) => art.appendChild(subQuestion(q.label, q.stem, q.opts, q.ans, done)));
+    art.appendChild(el('p', { class: 'q-source', lang: 'ja' }, source));
+    return art;
+  }
+  function textGrammarCard(t) {
+    const qs = t.blanks.map((b, i) => {
+      const opts = shuffle(b.opts);
+      return { label: '（ ' + (i + 1) + ' ）', stem: '', opts: opts, ans: opts.indexOf(b.opts[b.ans - 1]) };
+    });
+    return passageCard('文章の文法　N' + t.level, GRAMMAR_INSTR.text[band(t.level)], [t.text], qs,
+      'このサイトのために書いたオリジナルの練習文です。公式の問題ではありません。');
+  }
+  function readingCard(p) {
+    const b = band(p.level);
+    const instr = p.type === 'integrated' ? READING_INSTR.integrated : p.type === 'info' ? READING_INSTR['info' + b] : READING_INSTR[b];
+    const qs = p.questions.map((q, i) => ({ label: p.questions.length > 1 ? '問' + (i + 1) + '　' : '', stem: q.q, opts: q.opts, ans: q.ans - 1 }));
+    return passageCard('読解　' + READING_TYPE[p.type] + '　N' + p.level, instr, p.texts || [p.text], qs,
+      'このサイトのために書いたオリジナルの練習文です。公式の問題ではありません。');
+  }
+
+  function renderGrammarPractice() {
+    const e = study.entry, box = $('#grammar-practice'), meta = study.grammarMeta, my = study.seq;
+    box.textContent = '';
+    if (!e) { $('#sec-grammar').hidden = true; return; }
+    const cards = [];
+    if (meta) {
+      const rows = shuffle(study.grammarRows || []);
+      for (const r of rows) { const s = makeGrammarForm(e, r, meta); if (s) { cards.push(s); break; } }
+      let star = null;
+      for (const r of rows) { star = makeStar(e, r, meta); if (star) break; }
+      if (!star) for (const x of shuffle(study.examples || [])) { star = makeStarFromExample(e, x); if (star) break; }
+      if (star) cards.push(star);
+    }
+    cards.forEach((s, i) => { s.kicker = '問題 ' + (i + 1) + '　' + s.kicker; box.appendChild(questionCard(s)); });
+    loadJSON('data/reading.json').then((data) => {
+      if (my !== study.seq || !data) return;
+      const lv = e.jlpt || 1, pick = (list) => shuffle(list.filter((t) => t.level === lv))[0];
+      const tg = pick(data.textGrammar);
+      if (tg) box.appendChild(textGrammarCard(tg));
+      $('#sec-grammar').hidden = box.children.length === 0;
+      renderReadingPractice(data);
+    });
+    $('#sec-grammar').hidden = cards.length === 0;
+  }
+  // Reading at the word's level: one passage, a different format each time "別の問題にする" is pressed.
+  function renderReadingPractice(data) {
+    const e = study.entry, box = $('#reading-practice');
+    box.textContent = '';
+    if (!e || !data) { $('#sec-reading').hidden = true; return; }
+    const lv = e.jlpt || 1, list = data.passages.filter((p) => p.level === lv);
+    if (!list.length) { $('#sec-reading').hidden = true; return; }
+    study.readingTurn = ((study.readingTurn || Math.floor(Math.random() * list.length)) + 1) % list.length;
+    box.appendChild(readingCard(list[study.readingTurn]));
+    $('#sec-reading').hidden = false;
   }
 
   /* ---------- wiring ---------- */
@@ -1234,7 +1605,7 @@
     $('#furi-btn').addEventListener('click', () => { furi.on = !furi.on; store.set('furigana', furi.on); ensureFurigana(); redrawCaptions(); });
     renderFuriButton(false);
     $('#examples-more').addEventListener('click', () => { study.showAll = !study.showAll; renderExamples(); });
-    $('#practice-new').addEventListener('click', renderPractice);
+    $('#practice-new').addEventListener('click', () => { renderPractice(); renderGrammarPractice(); });
 
     $('#theme-toggle').addEventListener('click', () => {
       const root = document.documentElement;
@@ -1278,6 +1649,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   // Small surface for automated checks.
-  window.__kikitori = { state: state, study: study, makeFormation: makeFormation, makeContext: makeContext, makeParaphrase: makeParaphrase, makeUsage: makeUsage, MAKERS: MAKERS, byId: byId, normForm: normForm, furi: furi, loadTokenizer: loadTokenizer, alignReading: alignReading, captionSegs: captionSegs, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
+  window.__kikitori = { state: state, study: study, makeGrammarForm: makeGrammarForm, makeStar: makeStar, furiganize: furiganize, makeFormation: makeFormation, makeContext: makeContext, makeParaphrase: makeParaphrase, makeUsage: makeUsage, MAKERS: MAKERS, byId: byId, normForm: normForm, furi: furi, loadTokenizer: loadTokenizer, alignReading: alignReading, captionSegs: captionSegs, deinflect: deinflect, formParts: formParts, readingVariants: readingVariants, makeReading: makeReading, makeWriting: makeWriting, entryAt: entryAt, parseCaption: parseCaption, romajiToKana: romajiToKana, lookupExact: lookupExact, lookupReading: lookupReading, loadDict: loadDict,
     events: { onFetchDone: onFetchDone, onVideoChange: onVideoChange, onCaptionChange: onCaptionChange, onCaptionConsumed: onCaptionConsumed, onPlayerStateChange: onPlayerStateChange, onSpeedChange: onSpeedChange, onError: onError } };
 })();

@@ -278,6 +278,32 @@ ruby.hit + mark { display: inline-block; line-height: 1.15; padding-block: 0.06e
 .q-source a { color: inherit; }
 @media (max-width: 480px) { .q-opts { grid-template-columns: minmax(0, 1fr); } .q { padding: 12px; } }
 
+/* ---------- grammar panel ---------- */
+.grammar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.gr-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.gr-item { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.gr-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gr-pat { font: 600 1.1875rem/1.4 var(--font-jp); }
+.jlpt-mini { font: 700 0.75rem/1 var(--font-ui); padding: 4px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.gr-mean { font-size: 0.9375rem; }
+.gr-form, .gr-count { font-size: 0.8125rem; color: var(--ink-2); }
+.gr-label { font-weight: 700; }
+.gr-ex { font: 400 1.0625rem/2.1 var(--font-jp); overflow-wrap: anywhere; }
+.gr-ex u, .q-after u { text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 5px; }
+.gr-ex mark { background: var(--mark); color: var(--mark-ink); border-radius: 5px; padding: 0 0.12em; }
+.sec-h { font-size: 0.9375rem; font-weight: 700; color: var(--ink); margin: 14px 0 0; padding-left: 10px; border-left: 3px solid var(--accent); }
+.q-gram { font-size: 0.875rem; color: var(--ink); }
+.q-order { font: 600 0.9375rem/1.7 var(--font-jp); color: var(--ink); }
+/* passages */
+.passage-box { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.passage-text { white-space: pre-line; font: 400 1.0625rem/2 var(--font-jp); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-wrap: anywhere; }
+.sub-q { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.sub-stem { font: 600 1.0625rem/1.8 var(--font-jp); overflow-wrap: anywhere; }
+.sub-label { color: var(--accent); margin-right: 6px; }
+.q-stem.has-furi, .q-opt .has-furi, .sub-stem .has-furi, .passage-text.has-furi { line-height: 2.3; }
+.q-stem rt, .q-opt rt, .sub-stem rt, .passage-text rt { font: 400 0.5625rem/1 var(--font-ui); color: var(--ink-2); }
+.q-opt .has-furi { display: inline-block; }
+
 /* ---------- starter + rail ---------- */
 .starter { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 4px; }
 h2 { font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
