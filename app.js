@@ -1065,6 +1065,32 @@
   }
 
   /* One multiple-choice card, used for official and for generated questions. */
+  // Grammar is named in Japanese and explained in English: the list's English tags become the Japanese terms textbooks use.
+  const JA_TAG = { although: '逆接', and: '並列', appearance: '様態', approximately: '概数', but: '逆接', conditional: '条件', decide: '決定',
+    destination: '到着点・方向', 'embedded question': '間接疑問', emphasis: '強調', even: '強調', extent: '程度', frequency: '頻度', from: '起点', hearsay: '伝聞',
+    'hearsay/conjecture': '伝聞・推量', 'indirect object': '相手', instruction: '指示', like: '例示・比況', make: '変化させる', means: '手段', 'na-adjective': 'な形容詞',
+    named: '名称', nominalizer: '名詞化', or: '選択', passive: '受身', 'place of action': '動作の場所', 'place of existence': '存在の場所', possessive: '所有',
+    potential: '可能', prohibition: '禁止', purpose: '目的', question: '疑問', reason: '理由', subject: '主語', suggestion: '提案', time: '時', 'typical of': '典型',
+    until: '終点', while: '同時進行', with: '相手・共同' };
+  const jaName = (pat) => String(pat).replace(/（([A-Za-z][^）]*)）/g, (m, t) => '（' + (JA_TAG[t] || t) + '）');
+  const enTag = (pat) => { const m = /（([A-Za-z][^）]*)）/.exec(pat); return m ? m[1] : ''; };
+  const JA_TERMS = [['Verb-nai stem', '動詞ない形の語幹'], ['Verb-masu stem', '動詞ます形の語幹'], ['Verb-stem', '動詞ます形の語幹'], ['Verb-dict', '動詞辞書形'],
+    ['Verb-plain', '動詞普通形'], ['Verb-te', '動詞て形'], ['Verb-ta', '動詞た形'], ['Verb-nai', '動詞ない形'], ['Verb-volitional', '動詞意向形'], ['Verb-ba', '動詞ば形'],
+    ['i-Adj stem', 'い形容詞の語幹'], ['i-Adj-ku', 'い形容詞く形'], ['i-Adj', 'い形容詞'], ['na-Adj', 'な形容詞'], ['Noun', '名詞'], ['Sentence', '文'], ['Question word', '疑問詞']];
+  const jaForm = (f) => { let t = String(f); for (const [en, ja] of JA_TERMS) t = t.split(en).join(ja); return t; };
+  // "文法: 〜ている (N5) — be doing… · 接続: 動詞て形 + いる (Verb-te + いる)"
+  function grammarLine(box, p, extra) {
+    const q = el('p', { class: 'q-why' });
+    q.appendChild(el('b', { lang: 'ja' }, '文法「' + jaName(p[0]) + '」'));
+    q.appendChild(document.createTextNode(' (N' + p[1] + (enTag(p[0]) ? ', ' + enTag(p[0]) : '') + '): ' + p[2] + '.'));
+    box.appendChild(q);
+    const c = el('p', { class: 'q-why' });
+    c.appendChild(el('span', { class: 'gr-ja', lang: 'ja' }, '接続：' + jaForm(p[3])));
+    c.appendChild(el('span', { class: 'gr-en' }, '  (how it attaches: ' + p[3] + ')'));
+    box.appendChild(c);
+    if (extra) box.appendChild(el('p', { class: 'q-why' }, extra));
+  }
+  function translationLine(box, en) { if (en) box.appendChild(el('p', { class: 'q-why' }, 'The sentence means: “' + en + '”')); }
   // A JLPT level badge: N5..N1, or "casual" for slang and spoken forms the JLPT does not test.
   function levelPill(lv, note) {
     const t = lv ? 'N' + lv : 'casual';
@@ -1295,18 +1321,64 @@
     return cands.slice(0, n).map((c) => c[1]);
   }
   const levelOf = (e) => (e.basis === 'c' ? 0 : (e.jlpt || 1));
-  function finish(type, stem, right, wrong, x, e) {
+  const stripU = (t) => String(t).replace(new RegExp('[' + U0 + U1 + ']', 'g'), '');
+  // Why a reading choice is wrong: the kind of slip the test sets (濁音, 長音, 促音, 拗音), or another reading of a kanji.
+  function soundDiff(a, b) {
+    if (a.length === b.length) {
+      let i = 0; while (i < a.length && a[i] === b[i]) i++;
+      const ca = a[i], cb = b[i];
+      if ((VOICE[ca] || []).indexOf(cb) >= 0) return '「' + cb + '」 instead of 「' + ca + '」: the voiced or unvoiced sound (濁音・清音) is wrong';
+      if (/[ゃゅょ]/.test(ca + cb)) return '「' + cb + '」 instead of 「' + ca + '」: the small ゃ・ゅ・ょ (拗音) is wrong';
+      return '「' + cb + '」 instead of 「' + ca + '」: one sound is wrong';
+    }
+    const longer = a.length > b.length ? a : b, shorter = a.length > b.length ? b : a;
+    let i = 0; while (i < shorter.length && shorter[i] === longer[i]) i++;
+    if (longer.slice(0, i) + longer.slice(i + 1) === shorter) {
+      const c = longer[i], extra = b.length > a.length;
+      if (c === 'っ') return extra ? 'it adds a small っ (促音) the word does not have' : 'it drops the small っ (促音)';
+      if (/[うおいー]/.test(c)) return extra ? 'it lengthens a vowel (長音) with 「' + c + '」' : 'it shortens the long vowel (長音): 「' + c + '」 is missing';
+      return extra ? 'it adds 「' + c + '」' : 'it drops 「' + c + '」';
+    }
+    return 'it uses another reading (音読み／訓読み) of one of its kanji, not the one this word takes';
+  }
+  function vocabWhy(box, type, e, x, right, opts, ans, gloss, origins) {
+    const r = stripU(right), P = (t, ja) => box.appendChild(el('p', { class: 'q-why', lang: ja ? 'ja' : null }, t));
+    const ul = el('ul', { class: 'q-why-list' }), li = (t) => ul.appendChild(el('li', null, t));
+    if (type === 'reading') {
+      P('Answer: 「' + r + '」. 「' + (x.form || e.primary) + '」 (' + gloss + ') is read 「' + r + '」.');
+      const segs = e.split ? e.split.split('|') : [], chars = Array.from(e.primary);
+      if (segs.length > 1 && segs.length === chars.length) P('Reading of each kanji: ' + chars.map((c, i) => c + ' = ' + segs[i]).join(' · '));
+      opts.forEach((o, i) => { if (i !== ans) li('「' + stripU(o) + '」 ✗ — ' + soundDiff(r, stripU(o)) + '.'); });
+    } else if (type === 'orthography') {
+      P('Answer: 「' + r + '」 (read 「' + e.kana[0] + '」: ' + gloss + ').');
+      opts.forEach((o, i) => {
+        if (i === ans) return;
+        const w = stripU(o), a = Array.from(r), b = Array.from(w), k = b.findIndex((c, j) => c !== a[j]);
+        const g = glossOf(w);
+        li('「' + w + '」 ✗ — ' + (k >= 0 && a[k] ? 'it writes 「' + b[k] + '」 where the word has 「' + a[k] + '」 (a kanji that looks or sounds alike)' : 'a wrong spelling') + (g ? '; 「' + w + '」 is a different word: ' + g : '; there is no such word') + '.');
+      });
+    } else if (type === 'usage') {
+      P('「' + e.primary + '」 means “' + gloss + '”. Sentence ' + (ans + 1) + ' uses it with that meaning' + (x.en ? ': “' + x.en + '”' : '') + '.');
+      opts.forEach((o, i) => {
+        if (i === ans) return;
+        const og = origins[o];
+        li('Sentence ' + (i + 1) + ' ✗ — ' + (og ? 'here the word that fits is 「' + og.primary + '」 (' + og.gloss.split(';')[0] + '), not 「' + e.primary + '」.' : '「' + e.primary + '」 does not fit the meaning of this sentence.'));
+      });
+    } else {
+      if (type === 'paraphrase') P('The underlined 「' + (x.form || e.primary) + '」 means “' + gloss + '”; choice ' + (ans + 1) + ' 「' + r + '」 means nearly the same, so the sentence keeps its meaning.');
+      else if (type === 'formation') P('「' + r + '」 combines with the word to form 「' + (x.form || '') + '」' + (glossOf(x.form || '') ? ' (' + glossOf(x.form) + ')' : '') + '.');
+      else P('The blank needs a word meaning “' + gloss + '”: choice ' + (ans + 1) + ' 「' + r + '」.');
+      explainChoices(box, opts, ans, 'What each choice means:');
+    }
+    if (ul.children.length) box.appendChild(ul);
+    if (type !== 'usage') translationLine(box, x.en);
+  }
+  function finish(type, stem, right, wrong, x, e, origins) {
     wrong = Array.from(new Set(wrong.filter((w) => w && w !== right)));
     if (wrong.length < 3) return null;
     const opts = shuffle([right].concat(wrong.slice(0, 3)));
     const ans = opts.indexOf(right), gloss = e.gloss.split(';').slice(0, 2).join(';');
-    const explain = (box) => {
-      const r = String(right).replace(new RegExp('[' + U0 + U1 + ']', 'g'), '');
-      if (type === 'reading') box.appendChild(el('p', { class: 'q-why', lang: 'ja' }, '「' + (x.form || e.primary) + '」の読み方は「' + r + '」です。(' + gloss + ') The other choices are readings that do not exist for this word: a sound changed, lengthened or shortened, or another reading of one of its kanji.'));
-      else if (type === 'orthography') box.appendChild(el('p', { class: 'q-why', lang: 'ja' }, '「' + e.kana[0] + '」は「' + r + '」と書きます。(' + gloss + ') The other choices use a kanji that looks or sounds alike but is wrong here.'));
-      else if (type === 'usage') box.appendChild(el('p', { class: 'q-why' }, '「' + e.primary + '」 means ' + gloss + '. Only sentence ' + (ans + 1) + ' uses it with that meaning; in the others another word belongs there.'));
-      else explainChoices(box, opts, ans, type === 'paraphrase' ? 'The underlined part means the same as choice ' + (ans + 1) + '.' : type === 'formation' ? 'This is the part that forms the word in the sentence.' : 'Only choice ' + (ans + 1) + ' fits the meaning of the sentence.');
-    };
+    const explain = (box) => vocabWhy(box, type, e, x, right, opts, ans, gloss, origins || {});
     return {
       type: type, instr: instrFor(type, e.jlpt || 1), stem: stem, opts: opts, ans: ans, level: levelOf(e), explain: explain,
       after: (box) => {
@@ -1474,7 +1546,7 @@
     if (!sh || !(/^(n|vs|v1|v5[a-z]|adj-i)$/.test(e.cls) || (x.lastResort && /^(adv|adj-na|)$/.test(e.cls))) || x.ja.length > 34) return null;
     const parts = formParts(e, x.form);
     if (!parts) return null;
-    const level = e.jlpt || 1, wrong = [];
+    const level = e.jlpt || 1, wrong = [], origins = {};
     // Adverbs and な-adjectives (only when nothing else is possible) go into a noun's place, so the wrong sentences are clearly wrong.
     const fromCls = x.lastResort && /^(adv|adj-na|)$/.test(e.cls) ? 'n' : e.cls;
     for (const id of shuffle(Object.keys(sh))) {
@@ -1488,11 +1560,12 @@
         if (!p || p.tailH !== parts.tailH) continue;
         const t = inflectAs(e, p, false);
         if (!t) continue;
-        wrong.push(wrapFirst(y.ja, yform, U0 + t + U1));
+        const ws = wrapFirst(y.ja, yform, U0 + t + U1);
+        wrong.push(ws); origins[ws] = o;                    // which word the sentence really needs, for the explanation
         break;
       }
     }
-    return finish('usage', e.primary, wrapFirst(x.ja, x.form, U0 + x.form + U1), wrong, x, e);
+    return finish('usage', e.primary, wrapFirst(x.ja, x.form, U0 + x.form + U1), wrong, x, e, origins);
   }
 
   // 語形成 for a base word (可能 -> 可能性): uses the formed word's own example sentences.
@@ -1666,20 +1739,22 @@
   function grammarItem(p, row, e) {
     const li = el('li', { class: 'gr-item' });
     const head = el('div', { class: 'gr-head' });
-    head.appendChild(el('span', { class: 'gr-pat', lang: 'ja' }, p[0]));
+    head.appendChild(el('span', { class: 'gr-pat', lang: 'ja' }, jaName(p[0])));
+    if (enTag(p[0])) head.appendChild(el('span', { class: 'gr-en' }, enTag(p[0])));
     head.appendChild(el('span', { class: 'jlpt-mini', 'data-level': String(p[1]) }, 'N' + p[1]));
     li.appendChild(head);
     li.appendChild(el('p', { class: 'gr-mean' }, p[2]));
     const meta = study.grammarMeta, books = refsText(meta, row[0]), rr = meta && meta.refs && meta.refs[row[0]];
     if (books) {
       const bp = el('p', { class: 'gr-form' });
-      bp.appendChild(el('span', { class: 'gr-label' }, 'Taught in: '));
+      bp.appendChild(el('span', { class: 'gr-label' }, 'Textbooks & lists: '));
       bp.appendChild(document.createTextNode(books + (rr && rr.lists ? ' (JLPT lists say N' + rr.lists + '; the textbooks teach it at N' + rr.level + ')' : '')));
       li.appendChild(bp);
     }
     const form = el('p', { class: 'gr-form' });
-    form.appendChild(el('span', { class: 'gr-label' }, 'How it attaches: '));
-    form.appendChild(document.createTextNode(p[3]));
+    form.appendChild(el('span', { class: 'gr-label' }, '接続 (how it attaches): '));
+    form.appendChild(el('span', { class: 'gr-ja', lang: 'ja' }, jaForm(p[3])));
+    form.appendChild(el('span', { class: 'gr-en' }, '  (' + p[3] + ')'));
     li.appendChild(form);
     const ex = row[3], b = parseBraces(ex[0]);
     if (row[4]) {                    // a particle: the verb or adjective this word most often takes with it
@@ -1738,14 +1813,15 @@
       stem: plain.slice(0, ex[5]) + '（　　　）' + plain.slice(ex[6]), opts: opts, ans: opts.indexOf(right),
       after: (box) => grammarAfter(box, b, ex, p),
       explain: (box) => {
-        box.appendChild(el('p', { class: 'q-why' }, '「' + right + '」 (' + p[0] + ', N' + p[1] + '): ' + p[2] + '. It attaches as: ' + p[3] + '.'));
+        grammarLine(box, p, 'Answer: 「' + right + '」 — the form just before the blank is the one this grammar attaches to, and the meaning fits the sentence.');
         const ul = el('ul', { class: 'q-why-list' });
         for (const o of opts) {
           if (o === right) continue;
           const k = pointOf(o), q = k && meta.points[k];
-          ul.appendChild(el('li', null, '「' + o + '」' + (q ? ' (' + q[0] + ', N' + q[1] + '): ' + q[2] + ' — it attaches as ' + q[3] + ', so it cannot follow this form.' : ': does not fit here.')));
+          ul.appendChild(el('li', null, '「' + o + '」 ✗ — ' + (q ? '文法「' + jaName(q[0]) + '」 (N' + q[1] + ', ' + q[2] + ') attaches as 「' + jaForm(q[3]) + '」, which is not the form before the blank.' : 'it does not fit here.')));
         }
         box.appendChild(ul);
+        translationLine(box, ex[1]);
       },
       source: (s) => sourceLine(s, ex[8] || 't', ex[2], ex[9] || '', true)
     };
@@ -1776,16 +1852,19 @@
     const uniq = Array.from(new Set(wrong));
     if (uniq.length < 3) return null;
     const opts = shuffle([right].concat(shuffle(uniq).slice(0, 3)));
-    const NAME = { stem: 'the ます-stem', te: 'the て-form', ta: 'the た-form', dict: 'the dictionary form', nai: 'the ない-stem', vol: 'the volitional form',
-      astem: 'the stem (without い)', ku: 'the く-form', ba: 'the ば-stem' };
+    const NAME = { stem: 'ます形の語幹 (masu-stem)', te: 'て形 (te-form)', ta: 'た形 (ta-form)', dict: '辞書形 (dictionary form)', nai: 'ない形の語幹 (nai-stem)',
+      vol: '意向形 (volitional form)', astem: 'い形容詞の語幹 (stem without い)', ku: 'く形 (ku-form)', ba: 'ば形の語幹 (ba-stem)' };
     const nameOf = (f) => NAME[Object.keys(forms).find((k) => forms[k] === f)] || 'another form';
     return {
       kicker: '文法形式の判断', instr: GRAMMAR_INSTR.form[band(e.jlpt || 1)], level: p[1], levelNote: refsText(meta, g),
       stem: plain.slice(0, ex[3]) + '（　　　）' + rest, opts: opts, ans: opts.indexOf(right),
       after: (box) => grammarAfter(box, b, ex, p),
       explain: (box) => {
-        box.appendChild(el('p', { class: 'q-why' }, p[0] + ' (N' + p[1] + ') attaches as: ' + p[3] + '. So the word takes ' + nameOf(right) + ': ' + right + '.'));
-        box.appendChild(el('p', { class: 'q-why' }, 'The others are ' + opts.filter((o) => o !== right).map((o) => o + ' (' + nameOf(o) + ')').join(', ') + '; ' + p[0] + ' does not attach to them.'));
+        grammarLine(box, p, 'Answer: 「' + right + '」, the ' + nameOf(right) + ' — that is the form 「' + jaName(p[0]) + '」 attaches to.');
+        const ul = el('ul', { class: 'q-why-list' });
+        for (const o of opts) if (o !== right) ul.appendChild(el('li', null, '「' + o + '」 ✗ — this is the ' + nameOf(o) + '; 「' + jaName(p[0]) + '」 does not attach to it.'));
+        box.appendChild(ul);
+        translationLine(box, ex[1]);
       },
       source: (src) => sourceLine(src, ex[8] || 't', ex[2], ex[9] || '', true)
     };
@@ -1813,7 +1892,8 @@
       stem: plain.slice(0, ex[3]) + '（　　　）' + rest, opts: opts, ans: opts.indexOf(right),
       after: (box) => grammarAfter(box, b, ex, p),
       explain: (box) => {
-        box.appendChild(el('p', { class: 'q-why' }, '「' + right + '」 is used with ' + p[0] + ' (' + p[2] + '), and the sentence ends that way.'));
+        box.appendChild(el('p', { class: 'q-why' }, '副詞の呼応 (adverb–ending agreement): some adverbs require a particular ending later in the sentence. 「' + right + '」 goes with 「' + jaName(p[0]) + '」 (' + p[2] + '), and this sentence ends that way.'));
+        translationLine(box, ex[1]);
         box.appendChild(el('ul', { class: 'q-why-list' }, null));
         for (const w of pick) box.lastChild.appendChild(el('li', null, '「' + w + '」 needs ' + NEEDS_EN[w] + ', which this sentence does not have.'));
       },
@@ -1834,7 +1914,8 @@
       stem: plain.slice(0, gs) + '（　　　）' + plain.slice(gs + right.length), opts: opts, ans: opts.indexOf(right),
       after: (box) => grammarAfter(box, b, ex, p),
       explain: (box) => {
-        box.appendChild(el('p', { class: 'q-why' }, '「' + right + '」 ' + p[0] + ': ' + p[2] + '. With 「' + row[4] + '」, ' + e.primary + ' takes ' + right + ' (' + e.primary + right + row[4] + ': ' + row[5] + ' sentences in the collections).'));
+        box.appendChild(el('p', { class: 'q-why' }, '格助詞「' + right + '」 — 文法「' + jaName(p[0]) + '」 (' + p[2] + '). With the verb 「' + row[4] + '」, 「' + e.primary + '」 takes 「' + right + '」: ' + e.primary + right + row[4] + ' (' + row[5] + ' sentences in the collections).'));
+        translationLine(box, ex[1]);
         box.appendChild(el('p', { class: 'q-why' }, 'The particles ' + opts.filter((o) => o !== right).join(', ') + ' are almost never used before 「' + row[4] + '」 in about 5 million sentences.'));
       },
       source: (s) => sourceLine(s, ex[8] || 't', ex[2], ex[9] || '', true)
@@ -1846,8 +1927,8 @@
     box.appendChild(ja);
     if (ex[1]) box.appendChild(el('p', { class: 'q-en' }, ex[1]));
     const note = el('p', { class: 'q-gram' });
-    note.appendChild(el('b', { lang: 'ja' }, p[0] + '（N' + p[1] + '）'));
-    note.appendChild(document.createTextNode(' ' + p[2] + '. Form: ' + p[3] + '.'));
+    note.appendChild(el('b', { lang: 'ja' }, jaName(p[0]) + '（N' + p[1] + '）'));
+    note.appendChild(document.createTextNode(' ' + p[2] + '. 接続: ' + jaForm(p[3]) + ' (' + p[3] + ').'));
     box.appendChild(note);
   }
 
@@ -2112,8 +2193,8 @@
     dict: 'みんなの日本語 第18課 · GENKI I 第8課', pot: 'みんなの日本語 第27課 · GENKI II 第13課', vol: 'みんなの日本語 第31課 · GENKI II 第15課',
     imp: 'みんなの日本語 第33課', ba: 'みんなの日本語 第35課 · GENKI II 第22課', pass: 'みんなの日本語 第37課 · GENKI II 第21課', caus: 'みんなの日本語 第48課 · GENKI II 第22課' };
   function conjRule(vk, form, e) {
-    const group = { v1: 'a る-verb (Group 2)', v5: 'an う-verb (Group 1)', suru: 'a する-verb (irregular)', kuru: '来る (irregular)', iku: '行く, an う-verb with one exception (行って, 行った)',
-      aru: 'ある, an う-verb whose negative is ない', nasaru: 'a くださる-type verb (くださいます, ください)' }[vk.kind];
+    const group = { v1: '一段動詞 (a る-verb, Group 2)', v5: '五段動詞 (an う-verb, Group 1)', suru: 'する動詞 (irregular, Group 3)', kuru: '来る (irregular, Group 3)',
+      iku: '五段動詞 (an う-verb) with one exception: 行って, 行った', aru: '五段動詞 (an う-verb) whose ない形 is ない', nasaru: 'くださる型 (くださいます, ください)' }[vk.kind];
     const TE = { u: 'う・つ・る → って', t: 'う・つ・る → って', r: 'う・つ・る → って', k: 'く → いて', g: 'ぐ → いで', s: 'す → して', n: 'ぬ・ぶ・む → んで', b: 'ぬ・ぶ・む → んで', m: 'ぬ・ぶ・む → んで' };
     const v5 = { te: TE[vk.row], ta: (TE[vk.row] || '').replace(/て/g, 'た').replace(/で/g, 'だ'), nai: 'the last sound changes to the あ-row, then ない (う → わ: 買う → 買わない)',
       dict: 'the い-row sound before ます changes to the う-row (読みます → 読む)', pot: 'the last sound changes to the え-row, then る (読む → 読める)',
@@ -2128,13 +2209,41 @@
     if (vk.kind === 'aru' && form === 'nai') rule = 'the exception: ない (not あらない)';
     return (e ? e.primary + ' is ' : 'This is ') + group + '. ' + FORM_JA[form] + ': ' + rule + '. Taught in ' + FORM_BOOK[form] + '.';
   }
+  // The verb in all its forms, for the explanation.
+  function conjTable(vk) {
+    return [['ます形', 'masu'], ['て形', 'te'], ['た形', 'ta'], ['ない形', 'nai'], ['辞書形', 'dict'], ['可能形', 'pot'], ['意向形', 'vol'], ['受身形', 'pass'],
+      ['使役形', 'caus'], ['ば形', 'ba'], ['命令形', 'imp']].map(([n, f]) => { const v = conjugate(vk, f); return v ? n + ' ' + v : ''; }).filter(Boolean).join(' · ');
+  }
+  // Why a wrong conjugation is wrong: another real form of the verb, the wrong verb group, or the wrong sound change.
+  function verbWrongWhy(vk, o, form, right) {
+    for (const f of Object.keys(FORM_JA)) if (conjugate(vk, f) === o) return 'that is the ' + FORM_JA[f] + ', a different form';
+    if (conjugate(vk, 'masu') === o) return 'that is the ます形';
+    if (vk.kind === 'v5' || vk.kind === 'iku' || vk.kind === 'aru') {
+      const asV1 = { kind: 'v1', base: vk.row === 'r' ? vk.base : vk.base + ROW[vk.row][1] };
+      if (Object.keys(FORM_JA).some((f) => conjugate(asV1, f) === o)) return 'it conjugates the verb as a 一段動詞 (る-verb), but it is a 五段動詞 (う-verb)';
+      return 'the sound change (音便) or the row of the ending is wrong for a verb ending in 「' + ROW[vk.row][2] + '」';
+    }
+    if (vk.kind === 'v1') return 'it conjugates the verb as a 五段動詞 (う-verb), but it is a 一段動詞 (る-verb): just drop る';
+    return (vk.kind === 'kuru' ? '来る' : 'する') + ' is irregular' + (form && right ? ': its ' + FORM_JA[form] + ' is 「' + right + '」' : ', and this is not one of its forms')
+      + (vk.kind === 'suru' ? ' (する becomes し before ない, て and た; す before れば)' : ' (来る is read こ before ない, き before ます, て and た)');
+  }
   function verbConjugationDrill(e, vk, form) {
     const masu = conjugate(vk, 'masu'), right = conjugate(vk, form);
     if (!masu || !right) return null;
     const mv = modelVerb(vk, e);
     const spec = drillSpec('活用（' + FORM_JA[form] + '）', 'れいの ように、' + FORM_JA[form] + 'に して ください。',
       '（れい）' + conjugate(mv, 'masu') + ' → ' + conjugate(mv, form) + '\n' + masu + ' → （　　　）', right, verbMistakes(vk, form, right));
-    if (spec) { spec.level = FORM_LEVEL[form]; spec.levelNote = FORM_BOOK[form]; spec.explain = (b) => b.appendChild(el('p', { class: 'q-why' }, conjRule(vk, form, e))); }
+    if (spec) {
+      spec.level = FORM_LEVEL[form]; spec.levelNote = FORM_BOOK[form];
+      spec.explain = (b) => {
+        b.appendChild(el('p', { class: 'q-why' }, 'Answer: 「' + right + '」. ' + conjRule(vk, form, e)));
+        const ul = el('ul', { class: 'q-why-list' });
+        for (const o of spec.opts) if (o !== right) ul.appendChild(el('li', null, '「' + o + '」 ✗ — ' + verbWrongWhy(vk, o, form, right) + '.'));
+        b.appendChild(ul);
+        b.appendChild(el('p', { class: 'q-why' }, 'All the forms of 「' + conjugate(vk, 'dict') + '」: '));
+        b.lastChild.appendChild(el('span', { lang: 'ja' }, conjTable(vk)));
+      };
+    }
     return spec;
   }
   // い-adjectives, な-adjectives and nouns: the polite past and negative forms of みんなの日本語 第8課・第12課 (GENKI 第5課), or the plain ones.
@@ -2172,7 +2281,17 @@
       spec.level = 5; spec.levelNote = pf.kind === 'i' ? 'みんなの日本語 第8課・第12課 · GENKI I 第5課' : 'みんなの日本語 第1課・第12課 · GENKI I 第2課・第4課';
       const rule = pf.kind === 'i' ? 'い-adjective: drop い, then くない (not), かった (was), くなかった (was not); add です to be polite. Not 〜いでした or 〜いじゃありません. いい changes to よ-: よくない, よかった.'
         : (pf.kind === 'na' ? 'な-adjective' : 'Noun') + ': じゃない / じゃありません (not), だった / でした (was), じゃなかった / じゃありませんでした (was not). Never くない or かった' + (pf.kind === 'na' && /い$/.test(e.primary) ? ' — ' + e.primary + ' ends in い but is a な-adjective' : '') + '.';
-      spec.explain = (b) => b.appendChild(el('p', { class: 'q-why' }, rule));
+      spec.explain = (b) => {
+        b.appendChild(el('p', { class: 'q-why' }, 'Answer: 「' + right + '」. ' + rule));
+        const names = { nai: '否定形 (negative)', ta: '過去形 (past)', nakatta: '過去否定形 (past negative)', te: 'て形' };
+        const ul = el('ul', { class: 'q-why-list' });
+        for (const o of spec.opts) {
+          if (o === right) continue;
+          const k = Object.keys(pf.f).find((x) => pf.f[x] === o);
+          ul.appendChild(el('li', null, '「' + o + '」 ✗ — ' + (k ? 'that is the ' + names[k] + ', a different form' : 'this form does not exist' + (pf.kind === 'i' ? ' for an い形容詞' : pf.kind === 'na' ? ' for a な形容詞' : ' for a noun')) + '.'));
+        }
+        b.appendChild(ul);
+      };
     }
     return spec;
   }
@@ -2222,7 +2341,12 @@
       const spec = drillSpec('文型練習（' + pat[2] + '）', 'れいの ように、「' + pat[2] + '」の 形に して ください。', ex + '\n' + start + ' → （　　　）', right, wrong);
       if (spec) {
         spec.note = p[0] + '（N' + p[1] + '）: ' + p[2] + '. Form: ' + p[3] + '.'; spec.level = p[1]; spec.levelNote = refsText(meta, r[0]);
-        spec.explain = (b) => b.appendChild(el('p', { class: 'q-why' }, pat[2] + ' attaches as: ' + p[3] + '. The wrong choices put it on a form it does not attach to, or conjugate the word wrongly.'));
+        spec.explain = (b) => {
+          grammarLine(b, p, 'Answer: 「' + right + '」.');
+          const ul = el('ul', { class: 'q-why-list' });
+          for (const o of spec.opts) if (o !== right) ul.appendChild(el('li', null, '「' + o + '」 ✗ — ' + (vk ? 'the part before 「' + pat[1] + '」 is wrong: ' + verbWrongWhy(vk, o.slice(0, o.length - pat[1].length) + (pat[0] === 'naiStem' ? 'ない' : '')) : 'not the form 「' + pat[2] + '」 takes') + '.'));
+          b.appendChild(ul);
+        };
         return spec;
       }
     }

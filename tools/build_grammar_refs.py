@@ -96,7 +96,7 @@ for fn in glob.glob(os.path.join(sensei_dir, 'n*_*.html')):
     lv = int(os.path.basename(fn)[1])
     for pat in re.findall(r'class="jl-link jp"[^>]*>([^<]+)</a>', open(fn, encoding='utf-8').read()):
         for k in keys(pat.replace('・', '/')):
-            if len(k) < 2 and len(pat) > 1: continue
+            if len(k) < 2: continue                     # に, は alone match every particle point
             for g in by_key.get(k, ()): sensei[g].add(lv)
 BAND = {'Basic': {5, 4}, 'Intermediate': {3, 2}, 'Advanced': {1}}
 out, changed = {}, []

@@ -391,3 +391,17 @@ kbd { font: 700 0.75rem var(--font-ui); border: 1px solid var(--line); border-bo
 .q-why-list li.right b { color: var(--ok, #1a7f4b); }
 .q-why-list .n { display: inline-block; min-width: 1.4em; color: var(--ink-2); }
 .q-tick { color: var(--ok, #1a7f4b); font-weight: 700; }
+
+/* furigana over a highlighted word: the reading sits clearly above the coloured box, in every place sentences appear */
+.ex-ja, .gr-ex { line-height: 2.6; }
+:is(.ex-ja, .gr-ex, .q-after, .q-explain, .form-ex) ruby { ruby-position: over; -webkit-ruby-position: before; }
+:is(.ex-ja, .gr-ex, .q-after, .q-explain, .form-ex) rt { font: 500 0.58em/1.1 var(--font-jp); color: var(--ink-2); letter-spacing: 0; }
+:is(.ex-ja, .gr-ex, .q-after, .q-explain, .form-ex) ruby.hit rt { font-size: 0.62em; font-weight: 700; color: var(--ink); padding-bottom: 0.22em; background: none; }
+:is(.ex-ja, .gr-ex, .q-after, .q-explain, .form-ex) ruby.hit mark { display: inline-block; line-height: 1.2; padding: 0.05em 0.1em; margin: 0; border-radius: 5px; vertical-align: baseline; }
+:is(.ex-ja, .gr-ex, .q-after, .q-explain, .form-ex) ruby.hit-u rt { color: var(--ink); font-weight: 700; }
+.gr-ja { font: 600 0.9375rem/1.5 var(--font-jp); }
+.gr-en { color: var(--ink-2); font-size: 0.8125rem; }
+.q-explain, .q-explain .q-why, .q-explain .q-why-list { color: var(--ink); }
+/* a reading wider than its kanji is centred over them without spreading the kanji apart */
+ruby { ruby-align: center; }
+rt { white-space: nowrap; }
