@@ -428,7 +428,15 @@
     $('#word').hidden = false;
     renderSaveButton();
     renderLevel(showGloss ? e : null);
+    if (base && showGloss) renderFormLevel(e, base);
     renderStudy(e, query, !!kanaAmbiguous, base);
+  }
+  function renderFormLevel(e, info) {
+    const fl = formLevel(e, info), pill = $('#word-jlpt');
+    pill.dataset.level = String(fl.level);
+    pill.textContent = fl.level ? 'This form: JLPT N' + fl.level : 'Casual form · not in the JLPT';
+    $('#word-jlpt-note').textContent = fl.parts.map((p) => p.what + ' ' + (p.level ? 'N' + p.level : 'casual') + (p.note && p.note !== 'the word' ? ' (' + p.note + ')' : '')).join(' + ')
+      + (fl.level ? ' → the hardest part sets the level' : '') + (fl.casual && fl.level ? '; part of it is casual speech the JLPT does not test' : '');
   }
   function kanaHints(query, seq) {
     if (!isKanaOnly(query)) return;
@@ -953,6 +961,8 @@
       const n = Number(t.slice(1));
       if (t[0] === 'M') return [0, n, 'みんなの日本語 ' + (n <= 25 ? '初級I' : '初級II') + ' 第' + n + '課'];
       if (t[0] === 'G') return [1, n, 'GENKI ' + (n <= 12 ? 'I' : 'II') + ' 第' + n + '課'];
+      if (t[0] === 'R') return [2, n, 'まるごと ' + ['', '入門 (A1)', '初級1 (A2)', '初級2 (A2)', '初中級 (A2/B1)'][n]];
+      if (t[0] === 'Q') return [3, n, 'Quartet ' + (n <= 6 ? 'I' : 'II') + ' 第' + n + '課'];
       return null;
     }).filter(Boolean).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const seen = new Set();
@@ -1598,8 +1608,10 @@
     const parts = [];
     if (r.minna) parts.push('みんなの日本語 第' + r.minna + '課');
     if (r.genki) parts.push('GENKI ' + (r.genki <= 12 ? 'I' : 'II') + ' 第' + r.genki + '課');
+    if (r.quartet) parts.push('Quartet ' + (r.quartet[0] <= 6 ? 'I' : 'II') + ' 第' + r.quartet.slice(0, 3).join('・') + '課');
     if (r.tobira) parts.push('Tobira 第' + r.tobira.slice(0, 3).join('・') + '課');
     if (r.dojg) parts.push(r.dojg.map((v) => 'Dictionary of ' + v + ' Japanese Grammar').join(', '));
+    if (r.sensei) parts.push('JLPT Sensei: ' + r.sensei.map((l) => 'N' + l).join('/'));
     return parts.join(' · ');
   }
   const loadGrammarShard = (id) => loadJSON('data/gr/' + String(id % 64).padStart(2, '0') + '.json');
@@ -2307,7 +2319,36 @@
     'ba-col': ['〜りゃ／〜きゃ（〜ばの話し言葉）', 0, 'spoken 〜ば: 行けば → 行きゃ, 食べれば → 食べりゃ, 高ければ → 高けりゃ', 'ba'],
     yagaru: ['〜やがる', 0, 'vulgar: shows contempt for what someone does', ''], 'adj-ki': ['〜き（古い形）', 1, 'old attributive form (よき, 良き)', '']
   };
-  const formLabel = (g) => FORM_LABEL[g] || [g, 5, '', ''];
+  // Where みんなの日本語 and GENKI teach each form: [みんなの日本語 lesson, GENKI lesson] (0 = not a lesson point).
+  // A form's grammar level follows the books (1-25 / GENKI I = N5, 26-50 / GENKI II = N4) when they disagree with the list level.
+  const FORM_BOOKS = { masu: [4, 3], mashita: [4, 4], masen: [4, 3], 'masen-deshita': [4, 4], mashou: [6, 5], 'masen-ka': [6, 3], te: [14, 6], ta: [19, 9],
+    tara: [25, 17], tari: [19, 11], temo: [25, 23], nai: [17, 8], 'naide-kudasai': [17, 0], nakereba: [17, 12], 'nakute-mo-ii': [17, 17], pot: [27, 13],
+    pass: [37, 21], passpot: [37, 21], caus: [48, 22], causpass: [0, 23], vol: [31, 15], ba: [35, 22], imp: [33, 0], proh: [33, 0], tai: [13, 11],
+    nagara: [28, 18], sou: [43, 13], sugiru: [44, 12], yasui: [44, 0], nikui: [44, 0], 'ni-iku': [13, 0], kata: [0, 23], hajimeru: [0, 18],
+    'te-iru': [14, 7], 'te-oku': [30, 15], 'te-shimau': [29, 18], 'te-miru': [40, 13], 'te-aru': [30, 21], 'te-ageru': [24, 16], 'te-kureru': [24, 16],
+    'te-morau': [24, 16], 'te-kudasai': [14, 6], 'te-mo-ii': [15, 6], 'te-wa-ikenai': [15, 6], 'te-hoshii': [0, 21], 'adj-ta': [12, 5], 'adj-nai': [8, 5],
+    'adj-nakatta': [12, 5], 'adj-te': [16, 7], 'adj-naru': [19, 10], 'adj-sou': [43, 13], 'adj-sugiru': [44, 12], 'na-da': [20, 8], 'na-ta': [20, 9],
+    'na-deshita': [12, 5], 'na-nai': [8, 5], 'na-nakatta': [12, 5], 'na-na': [8, 5], 'na-de': [16, 7], 'na-naru': [19, 10], 'n-da': [26, 12],
+    deshou: [21, 12], kamo: [32, 14], tsumori: [31, 10], tte: [0, 17] };
+  function formBooks(g) {
+    const b = FORM_BOOKS[g];
+    if (!b) return '';
+    return [b[0] ? 'みんなの日本語 第' + b[0] + '課' : '', b[1] ? 'GENKI ' + (b[1] <= 12 ? 'I' : 'II') + ' 第' + b[1] + '課' : ''].filter(Boolean).join(' · ');
+  }
+  function formLevelOf(g) {
+    const lv = (FORM_LABEL[g] || [g, 5])[1], b = FORM_BOOKS[g];
+    if (!b || !lv) return lv;
+    const books = new Set(b.map((n, i) => (n ? (n <= (i === 0 ? 25 : 12) ? 5 : 4) : 0)).filter(Boolean));
+    return books.has(lv) ? lv : Array.from(books).sort((x, y) => Math.abs(x - lv) - Math.abs(y - lv))[0];
+  }
+  const formLabel = (g) => { const L = FORM_LABEL[g] || [g, 5, '', '']; return [L[0], formLevelOf(g), L[2], L[3]]; };
+  // The level of a searched form: the hardest of the word and the grammar steps that made it.
+  function formLevel(e, info) {
+    const parts = [{ what: e.primary, level: e.basis === 'c' ? 0 : (e.jlpt || 0), note: 'the word' }];
+    for (const st of info.steps) parts.push({ what: formLabel(st.g)[0], level: formLabel(st.g)[1], note: formBooks(st.g) });
+    const tested = parts.map((p) => p.level).filter((l) => l > 0);
+    return { level: tested.length ? Math.min(...tested) : 0, casual: parts.some((p) => !p.level), parts: parts };
+  }
   const FORM_HOW = {
     causpass: 'る-verb stem + させられる (食べさせられる); う-verb ない-stem + せられる, or the short される (書かせられる / 書かされる); する → させられる; 来る → こさせられる',
     renyou: 'the ます-stem: 食べ, 書き, し, 来 (き)', 'adj-adv': 'い-adjective stem + く (高い → 高く)', 'na-ni': 'な-adjective + に (静か → 静かに)',
@@ -2360,6 +2401,8 @@
         head.appendChild(el('span', { class: 'jlpt-mini', 'data-level': String(L[1]) }, 'N' + L[1]));
         li.appendChild(head);
         li.appendChild(el('p', { class: 'gr-mean' }, L[2]));
+        const fb = formBooks(s.g);
+        if (fb) { const bp = el('p', { class: 'gr-form' }); bp.appendChild(el('span', { class: 'gr-label' }, 'Taught in: ')); bp.appendChild(document.createTextNode(fb)); li.appendChild(bp); }
         const p = meta && L[3] && meta.points[L[3]], how = (p && p[3]) || FORM_HOW[s.g];
         if (how) { const fp = el('p', { class: 'gr-form' }); fp.appendChild(el('span', { class: 'gr-label' }, 'How it attaches: ')); fp.appendChild(document.createTextNode(how)); li.appendChild(fp); }
         steps.appendChild(li);
@@ -2489,7 +2532,7 @@
     const pick = wrong.slice(0, 2).concat(shuffle(wrong.slice(2))).slice(0, 3);          // the closest mistakes first
     if (pick.length < 3) return null;
     const opts = shuffle([right].concat(pick));
-    const levels = info.steps.map((st) => formLabel(st.g)[1]).filter((l) => l), lv = levels.length < info.steps.length ? 0 : Math.min(...levels);
+    const lv = formLevel(e, info).level;
     return { kicker: '活用（この形を作る）', instr: 'れいの ように、同じ 形に して ください。', stem: '（れい）' + model + ' → ' + mForm + '\n' + info.base + ' → （　　　）',
       opts: opts, ans: opts.indexOf(right), pre: true, level: lv,
       explain: (b) => info.steps.forEach((st, i) => b.appendChild(el('p', { class: 'q-why' }, (i ? '→ ' : info.base + ' → ') + st.form + ': ' + formLabel(st.g)[0] + ' — ' + formLabel(st.g)[2]))) };

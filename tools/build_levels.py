@@ -16,7 +16,13 @@ The JLPT has published no word list since 2010, so this combines independent evi
 Words on no list get an estimate from a model trained on the listed words: how common the word is
 (wordfreq, CC BY-SA 4.0), the JLPT level of its kanji, its length and its part of speech.
 
-Usage: python3 tools/build_levels.py JAMDICT_DB WALLER_DIR JAMSINCLAIR_DIR EGGROLLS_JSON EXAM_DIR KANJI_JSON OFFICIAL_JSON MINNA_JSON GENKI_CSV OUT.json
+  more     まるごと (the Japan Foundation's JF Standard course; vocabulary indexes from marugoto.jpf.go.jp, as text with
+           pdftotext -layout): Starter A1 = N5, Elementary 1-2 A2 = N4, Pre-intermediate A2/B1 = N3;
+           中級日本語カルテット Quartet (The Japan Times; QUARTET_word_index.xlsx from quartet.japantimes.co.jp): I = N3, II = N2.
+           A word's textbook level is the earliest stage any of these books teaches it at.
+
+Usage: python3 tools/build_levels.py JAMDICT_DB WALLER_DIR JAMSINCLAIR_DIR EGGROLLS_JSON EXAM_DIR KANJI_JSON OFFICIAL_JSON MINNA_JSON GENKI_CSV
+       MARUGOTO_TXT_DIR QUARTET_WORD_INDEX_XLSX OUT.json
 Output: {"<JMdict id>": [level 5..1 or 0, basis, textbook lessons such as "M12 G5"], ...} and a report on stderr.
   basis: "agree" (lists agree), "list" (one list), "mixed" (lists differ; the list level nearer the estimate is kept),
          "exam" (raised to the easiest level whose real exams use it), "est" (estimated), "beyond" (rarer than N1),
@@ -26,7 +32,7 @@ or colloquial words of 2.5 or more (names and titles left out).
 """
 import sys, os, re, csv, json, sqlite3, collections, glob, math, random
 
-db_path, waller_dir, jam_dir, egg_path, exam_dir, kanji_path, official_path, minna_path, genki_path, out_path = sys.argv[1:11]
+db_path, waller_dir, jam_dir, egg_path, exam_dir, kanji_path, official_path, minna_path, genki_path, marugoto_dir, quartet_path, out_path = sys.argv[1:13]
 db = sqlite3.connect('file:%s?mode=ro' % db_path, uri=True)
 c = db.cursor()
 
@@ -155,6 +161,36 @@ with open(genki_path, encoding='utf-8') as f:
         except ValueError: continue
         textbook[i] = max(textbook.get(i, 0), 5 if L <= 12 else 4)   # GENKI I (0-12) ~ N5, GENKI II (13-23) ~ N4
         lessons[i].append('G%d' % L)
+
+# ---- まるごと (vocabulary indexes) and Quartet (word index)
+MG = [('Starter', 5, '1'), ('Elementary1', 4, '2'), ('Elementary2', 4, '3'), ('Pre-Intermediate', 3, '4')]     # tags R1..R4
+for fn in sorted(glob.glob(os.path.join(marugoto_dir, 'mg_Marugoto*VocabularyIndex_EN.txt'))):
+    stage = next((x for x in MG if x[0] in fn), None)
+    if not stage: continue
+    for line in open(fn, encoding='utf-8'):
+        m = re.match(r'^\s{0,4}(\S+)\s{2,}(\S+)\s{2,}([A-Za-z~][A-Za-z~ ()\'-]*?)\s{2,}', line)
+        if not m: continue
+        word = re.sub(r'[（(].*?[)）]|～', '', m.group(1)); read = re.sub(r'[￣￢、]', '', m.group(2))
+        if not word or word == '―': continue
+        i = match(word, read if re.search(r'[぀-ヿ]', read) else '') or match(word)
+        tally('marugoto', i)
+        if not i: continue
+        textbook[i] = max(textbook.get(i, 0), stage[1])
+        lessons[i].append('R' + stage[2])
+import openpyxl
+ws = openpyxl.load_workbook(quartet_path, read_only=True).worksheets[1]
+for row in ws.iter_rows(values_only=True):
+    cells = [str(x) for x in row if x is not None]
+    les = next((x for x in cells if re.match(r'L\d+', x)), None)
+    if not les or len(cells) < 3: continue
+    L = int(re.match(r'L(\d+)', les).group(1))
+    kana = re.sub(r'（.*?）|\(.*?\)', '', cells[1]); kanji = cells[2] if re.search(r'[一-鿿]', cells[2]) else ''
+    kanji = re.sub(r'（.*?）|\(.*?\)|\s', '', kanji)
+    i = (match(kanji, kana) if kanji else None) or match(kana)
+    tally('quartet', i)
+    if not i: continue
+    textbook[i] = max(textbook.get(i, 0), 3 if L <= 6 else 2)
+    lessons[i].append('Q%d' % L)
 
 # ---- combine the lists
 level, basis = {}, {}

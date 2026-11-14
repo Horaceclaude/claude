@@ -11,11 +11,15 @@ Level: the OpenJLPT level stands unless the textbooks disagree with it: when み
 both put a pattern at a level other than the listed one, it takes the textbooks' level nearest to the list; for patterns
 neither book teaches, when the DoJG volume and Tobira both exclude the listed level, the nearest level both allow.
 
-Usage: python3 tools/build_grammar_refs.py data/grammar.json TOBIRA_INDEX_HTML DOJG_TERM_BANK_JSON data/grammar-refs.json
+  中級日本語カルテット Quartet I / II (~N3 / ~N2): the official grammar index QUARTET_grammar_index.xlsx (quartet.japantimes.co.jp)
+  JLPT Sensei (jlptsensei.com): its N5-N1 grammar lists, a second list beside OpenJLPT
+
+Usage: python3 tools/build_grammar_refs.py data/grammar.json TOBIRA_INDEX_HTML DOJG_TERM_BANK_JSON QUARTET_GRAMMAR_XLSX
+       JLPTSENSEI_HTML_DIR data/grammar-refs.json
 """
 import sys, re, json, collections
 
-grammar_path, tobira_path, dojg_path, out_path = sys.argv[1:5]
+grammar_path, tobira_path, dojg_path, quartet_path, sensei_dir, out_path = sys.argv[1:7]
 G = json.load(open(grammar_path, encoding='utf-8'))['points']
 
 # [みんなの日本語 lesson, GENKI lesson] (0 = not taught as a lesson point)
@@ -32,7 +36,7 @@ BOOKS = {
     'ba': [35, 22], 'nara': [35, 13], 'reru-rareru-passive': [37, 21], 'te-miru': [40, 13], 'sou-da-appearance': [43, 13],
     'sugiru': [44, 12], 'sou-da-hearsay': [47, 17], 'seru-saseru': [48, 22], 'mitai': [0, 17], 'te-hoshii': [0, 21],
     'hajimeru-owaru-tsuzukeru': [0, 18], 'ku-suru-ni-suru': [0, 21], 'koto-ni-suru': [0, 23], 'koto-ni-shite-iru': [0, 23],
-    'kata': [0, 23], 'tara-dou': [0, 14], 'ba-yokatta': [0, 18]}
+    'kata': [0, 23], 'tara-dou': [0, 14], 'ba-yokatta': [0, 18], 'kurai-gurai': [11, 10], 'tame-ni': [42, 0], 'shika-nai': [27, 14]}
 
 def keys(pattern):
     """The bare forms of a pattern: 〜てはいけない -> {てはいけない}; Noun{で／から}できる -> {でできる, からできる}."""
@@ -75,6 +79,25 @@ for e in json.load(open(dojg_path, encoding='utf-8')):
         if len(k) < 2: continue
         for g in by_key.get(k, ()): dojg[g].add(VOL[m.group(2)])
 
+# Quartet grammar index: pattern, lesson (L1-6 = Quartet I, L7-12 = Quartet II)
+import openpyxl, glob, os
+quartet = collections.defaultdict(set)
+for row in openpyxl.load_workbook(quartet_path, read_only=True).worksheets[1].iter_rows(values_only=True):
+    cells = [str(x) for x in row if x is not None]
+    les = next((x for x in cells if re.match(r'L\d+-\d+', x)), None)
+    if not les: continue
+    pat = cells[cells.index(les) - 1]
+    for k in keys(pat):
+        if len(k) < 2: continue
+        for g in by_key.get(k, ()): quartet[g].add(int(re.match(r'L(\d+)', les).group(1))); strong[g] = strong[g] or len(k) >= 3
+# JLPT Sensei: level of each pattern
+sensei = collections.defaultdict(set)
+for fn in glob.glob(os.path.join(sensei_dir, 'n*_*.html')):
+    lv = int(os.path.basename(fn)[1])
+    for pat in re.findall(r'class="jl-link jp"[^>]*>([^<]+)</a>', open(fn, encoding='utf-8').read()):
+        for k in keys(pat.replace('・', '/')):
+            if len(k) < 2 and len(pat) > 1: continue
+            for g in by_key.get(k, ()): sensei[g].add(lv)
 BAND = {'Basic': {5, 4}, 'Intermediate': {3, 2}, 'Advanced': {1}}
 out, changed = {}, []
 for g, v in G.items():
@@ -84,11 +107,17 @@ for g, v in G.items():
         if b[0]: r['minna'] = b[0]
         if b[1]: r['genki'] = b[1]
     if tobira.get(g): r['tobira'] = sorted(tobira[g])
+    if quartet.get(g): r['quartet'] = sorted(quartet[g])
+    if sensei.get(g): r['sensei'] = sorted(sensei[g], reverse=True)
     if dojg.get(g): r['dojg'] = sorted(dojg[g])
     new = lv
     if b:                                      # the textbooks' levels: みんなの日本語 1-25 / GENKI 1-12 = N5, later lessons = N4
         books = {5 if n <= (25 if i == 0 else 12) else 4 for i, n in enumerate(b) if n}
         if lv not in books: new = min(books, key=lambda x: abs(x - lv))
+    elif r.get('quartet') and strong[g] and lv not in {3 if min(r['quartet']) <= 6 else 2} and (not r.get('sensei') or lv not in r['sensei']):
+        # Quartet teaches it (I: N3, II: N2) and JLPT Sensei does not support the listed level either: one level toward Quartet
+        q = 3 if min(r['quartet']) <= 6 else 2
+        new = lv + (1 if q > lv else -1)
     elif r.get('dojg') and r.get('tobira'):    # both the grammar dictionary and Tobira exclude the listed level
         dband, tband = set().union(*(BAND[x] for x in r['dojg'])), {3, 2}
         both = dband & tband
@@ -99,7 +128,9 @@ for g, v in G.items():
     r['level'] = new
     out[g] = r
 json.dump(out, open(out_path, 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
-n = collections.Counter(k for r in out.values() for k in r if k in ('minna', 'genki', 'tobira', 'dojg'))
+n = collections.Counter(k for r in out.values() for k in r if k in ('minna', 'genki', 'tobira', 'dojg', 'quartet', 'sensei'))
+agree = sum(1 for g, r in out.items() if r.get('sensei') and G[g][1] in r['sensei'])
+print('OpenJLPT and JLPT Sensei agree on', agree, 'of', sum(1 for r in out.values() if r.get('sensei')), 'shared points', file=sys.stderr)
 print('grammar points', len(out), '| with textbook references', sum(1 for r in out.values() if len(r) > 1), dict(n), file=sys.stderr)
 print('levels changed by the textbooks', len(changed), file=sys.stderr)
 for c in changed: print('   %-36s %-28s N%d -> N%d' % c, file=sys.stderr)

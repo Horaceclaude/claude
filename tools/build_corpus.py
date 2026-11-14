@@ -644,18 +644,49 @@ def complete(ms):
     return any(m.part_of_speech()[0] in ('動詞', '形容詞', '助動詞') for m in toks)
 FRAGMENT_EN = re.compile(r"^(and|or|but|so|that|which|who|who's|whom|whose|where|when|while|because|than|to|of|for|with|over|into|from|at|in|on|as|if|then|by|about|like)\b", re.I)
 
+# ---- quality checks for subtitle and Wikipedia sentences
+GLOSS = {}
+STOP = set('the a an to of in on at for and or be is are was with by as from that this it its one some any thing things person someone something sth'.split())
+for e in E:
+    GLOSS[e[6]] = {w for w in re.findall(r"[a-z]+", e[2].lower()) if len(w) >= 3 and w not in STOP}
+def gloss_ok(eid, en):
+    """A subtitle's English is shown only when it has a word of the dictionary meaning: misaligned subtitles are common."""
+    words = re.findall(r"[a-z]+", en.lower())
+    for g in GLOSS.get(eid, ()):
+        stem = g[:max(4, len(g) - 2)] if len(g) >= 5 else g
+        if any(w == g or (len(g) >= 5 and w.startswith(stem)) for w in words): return True
+    return False
+def japanese(sentence):
+    """Japanese, not Chinese: some hiragana, and none of the characters only Chinese uses."""
+    return len(re.findall(r'[ぁ-ゖ]', sentence)) >= 2 and not re.search(r'[們這嗎哦對還個們說麼妳]', sentence)
+KANA_TOKEN = re.compile(r'^[ぁ-ゖァ-ヺー]+$')
+def inside_longer(ms, k):
+    """A kana word that is only part of a longer kana run (テックス in ミューテックス, とん in とんまめ)."""
+    t = ms[k].surface()
+    if not KANA_TOKEN.match(t): return False
+    kata = re.match(r'^[ァ-ヺー]+$', t)
+    for j in (k - 1, k + 1):
+        if 0 <= j < len(ms):
+            n = ms[j]
+            if n.part_of_speech()[0] in ('名詞', '接頭辞', '接尾辞') and KANA_TOKEN.match(n.surface()) and bool(re.match(r'^[ァ-ヺー]+$', n.surface())) == bool(kata):
+                return True
+    return False
+
 def scan(sentence, en, sid, src, title, base):
+    if not japanese(sentence): return False
     ms = list(tok.tokenize(sentence, SplitMode.C))
     if not complete(ms): return False
     if src == 'j' and (FRAGMENT_EN.match(en) or not (0.7 <= len(en) / max(1, len(sentence)) <= 6)): return False
     ents = [entry_for(m) for m in ms]
     hit = False
     for k, eid in enumerate(ents):
-        if eid is not None and len(sentence) <= 40: note_form(eid, sentence, ms, k, en, sid, src, title, base)
-        if eid is None or total[eid] >= PER_WORD_SENTENCES: continue
+        if eid is None or inside_longer(ms, k): continue
+        en_k = en if (src != 'j' or gloss_ok(eid, en)) else ''       # a subtitle translation that does not match is not shown
+        if len(sentence) <= 40: note_form(eid, sentence, ms, k, en_k, sid, src, title, base)
+        if total[eid] >= PER_WORD_SENTENCES: continue
         if len(EX.get(eid, ())) >= PER_WORD_EXAMPLES and total[eid] >= 60: continue
-        score = base + abs(len(sentence) - 20) + 4 * difficulty(ents, eid)
-        record(eid, sentence, ms, k, en, sid, src, title, score)
+        score = base + abs(len(sentence) - 20) + 4 * difficulty(ents, eid) + (0 if en_k or src != 'j' else 25)
+        record(eid, sentence, ms, k, en_k, sid, src, title, score)
         hit = True
     return hit
 
